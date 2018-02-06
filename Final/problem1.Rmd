@@ -1,0 +1,239 @@
+---
+title: "problem1"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+library(dplyr)
+library(reshape2)
+library(ggplot2)
+library(countrycode)
+library(randomForest)
+library(stringr)
+library(e1071)
+```
+# Problem 1: univariate and unsupervised analysis (20 points)
+
+Download and read "Census Income" data into R and prepare graphical and numerical summaries of it: e.g. histograms of continuous attributes, contingency tables of categorical variables, scatterplots of continuous attributes with some of the categorical variables indicated by color/symbol shape, etc.  Perform principal components analysis of this data (do you need to scale it prior to that? how would you represent multilevel categorical attributes to be used as inputs for PCA?) and plot observations in the space of the first few principal components with subjects' gender and/or categorized income indicated by color/shape of the symbol.  Perform univariate assessment of associations between outcome we will be modeling and each of the attributes (e.g. t-test or logistic regression for continuous attributes, contingency tables/Fisher exact test/$\chi^2$ test for categorical attributes).  Summarize your observations from these assessments: does it appear that there is association between outcome and predictors? Which predictors seem to be more/less relevant?
+
+```{r}
+
+adultDat <- read.csv("adult.data", header = FALSE)
+
+#Skipping first row as it contains a strange string
+adultTest <- read.csv("adult.test", skip=1, header=FALSE)
+
+#Take a peek
+head(adultDat)
+head(adultTest)
+
+#Assign names, taken from the corresponding txt files
+adultNames <- unique(str_match(readLines("old.adult.names.txt"), "^[a-zA-Z-]+"))
+adultNames <- adultNames[!is.na(adultNames)]
+
+#Replace dashes with dots for easier reference
+adultNames <-gsub('-','.',adultNames)
+
+#Assign names 
+colnames(adultDat) <- adultNames
+head(adultDat)
+
+colnames(adultTest) <- adultNames
+head(adultTest)
+
+#Check that numerics are read in correctly and characters read as factors
+summary(adultDat)
+summary(adultTest)
+
+#From here we can see that the numerics values are clean (no NAs). 
+#Will transpose and merge the unique values of each character variable
+#to see what may need cleaning before we concatenate the datasets
+sapply(adultDat,class)
+
+#Store bool of Character and Numeric variables
+charVect <- sapply(adultDat, class) %in% c('character', 'factor')
+numVect <- sapply(adultDat, class) %in% c('integer')
+
+#Distinct categorical data in each data frame
+adultLong <- melt(as.matrix(adultDat[,charVect])) %>% group_by(Var2,value) %>% summarise(n.adult=n_distinct(value)) 
+testLong <- melt(as.matrix(adultTest[,charVect])) %>% group_by(Var2,value) %>% summarise(n.test=n_distinct(value)) 
+
+#Values that will need to be investigated
+merge(adultLong,testLong, by=c("Var2","value"),all=TRUE) %>% filter(is.na((n.adult+n.test)))
+
+#Holland-Netherlands is a valid country name, so will just compress the . from the class variable in the test dataset.
+adultTest$class <- gsub('[.]','',adultTest$class)
+
+#We can also see that we have some missing values in the following variables that we will have to look into imputing
+adultLong[adultLong$value==' ?',1]
+
+#Join our cleaned datasets
+incomeDat <- rbind(adultDat,adultTest)
+
+#Checking that the class of variables is preserved
+summary(incomeDat)
+
+#Class looks to fixed now
+missWrkClss <- incomeDat[incomeDat$workclass==' ?',]
+missOcupatn <- incomeDat[incomeDat$occupation==' ?',]
+missNatCntr <- incomeDat[incomeDat$native.country==' ?',]
+
+#For the time being, going to replace vars with ? with NA
+incomeDat[,charVect] <- apply(incomeDat[,charVect],2,function(x) gsub(' [?]',NA,x))
+
+#Remove the leading spaces from the character variables
+incomeDat[,charVect] <- apply(incomeDat[,charVect],2,function(x) gsub('^ ','',x))
+
+#Converting back to factor
+incomeDat <- as.data.frame(unclass(incomeDat))
+
+#Remove all records with NA
+nIncomeDat <- na.omit(incomeDat)
+
+#Lets see how much data we lose by removing NAs
+(nrow(incomeDat)-nrow(nIncomeDat))/nrow(incomeDat)*100
+
+#We lose about 7.5% of the data, however it seems more hassle than its worth to impute values for this amount of data, so will continue with these. Especially since we cannot guarantee whether the missings are random or if there is an underlying pattern.
+
+#Dataset is too big for testing, taking a random sample of 2k 
+sampIncome <- data.frame(nIncomeDat[sample(1:nrow(nIncomeDat), 2000,
+  	replace=FALSE),])
+
+#Categorical data
+#Contingency table
+nIncomeDat[,charVect] %>% melt(id="class") %>% group_by(variable,value,class) %>% summarise(n=n()) %>% dcast(variable+value~class,value.var="n") %>% kable()
+
+#We have a lot of granularity in the categorical data which we could do without
+
+#Looking at the education level and education num, it looks like we dont need both education and education.num. Furthermore its prob better to collapse the levels also and turn it into dummy variables if possible
+table(sampIncome$education,sampIncome$education.num)
+
+table(sampIncome$marital.status,sampIncome$relationship)
+#Bar char colored by outcome
+sampIncome[,charVect] %>% melt(id.vars="class") %>% 
+  ggplot(aes(x=value,fill=class)) + geom_bar() + facet_wrap(~variable, scales = "free") 
+
+
+#Performing Chi-sq test on the whole dataset to see which variables are independent of income class
+lapply(nIncomeDat[,charVect], function(x) {
+chisq.test(x, nIncomeDat$class)
+})  
+#It seems that all variables are related to the outcome variable with a very strong significance
+
+
+
+#Continuous variables
+#Creates color pallette based on unique column values
+#taken from ISLR
+Cols=function(vec){
+  cols=rainbow(length(unique(vec)))
+  return(cols[as.numeric(as.factor(vec))]) 
+}
+
+#Scatterplot matrix, colored by income class
+pairs(~.,data=sampIncome[,numVect], 
+        col=Cols(sampIncome$class))
+
+#Here age seems to be correlated with weight (fnlwgt) as is expected
+
+
+#Histogram plot
+as.matrix(sampIncome[,numVect]) %>% melt() %>% mutate(value=as.numeric(value)) %>% ggplot(aes(x=value)) + geom_histogram() + facet_wrap(~Var2, scales = "free")
+
+
+lapply(nIncomeDat[,numVect], function(x) t.test(x ~ nIncomeDat$class, var.equal = TRUE))
+#fnlWgt is the only variable that has no relationship with the outcome variable. We may consider dropping this
+
+
+nvClass <- c(numVect[1:14],TRUE)
+
+sampIncome[,nvClass] %>% melt(id.vars="class") %>% ggplot(aes(x=variable, y=value,group=class,fill=class)) + geom_boxplot() + facet_wrap(~variable, scales = "free")
+
+#drop fnlwgt
+#log transform age
+#drop education.num
+#pre-college (1:10), 
+
+plot(nIncomeDat$education.num,col=Cols(nIncomeDat$class))
+#Although education matters, it doesnt seem to be a large distinction prior to high school
+
+
+cIncomeDat <- nIncomeDat
+cIncomeDat$education <- as.character(cIncomeDat$education)
+cIncomeDat$education[cIncomeDat$education.num <=10] <- "Pre-College"
+cIncomeDat$education<- as.factor(cIncomeDat$education)
+
+#Drop education num
+cIncomeDat$education.num <- NULL
+
+#Drop final weight
+cIncomeDat$fnlwgt <- NULL
+
+cIncomeDat$age <- log(cIncomeDat$age)
+
+#Recoding countries to regions
+cIncomeDat$region <- countrycode(cIncomeDat$native.country,"country.name","region")
+
+#Some issues converting columbia, england, hong, scotland, south and yugoslavia
+#need to fix these and try again
+
+cIncomeDat$native.country <- as.character(cIncomeDat$native.country)
+cIncomeDat$native.country[cIncomeDat$native.country=="Columbia"] <- "Colombia"
+cIncomeDat$native.country[cIncomeDat$native.country=="Hong"] <- "Hong Kong"
+cIncomeDat$native.country[cIncomeDat$native.country %in% c("England","Scotland")] <- "UK"
+
+#For the sake of argument, just picking one
+cIncomeDat$native.country[cIncomeDat$native.country %in% c("Yugoslavia")] <- "Bosnia"
+
+cIncomeDat <- cIncomeDat[cIncomeDat$native.country!="South",]
+cIncomeDat$region <-( countrycode(cIncomeDat$native.country,"country.name","region"))
+cIncomeDat$region <- as.factor(cIncomeDat$region)
+cIncomeDat$native.country <- NULL
+
+#Creating our data matrix that will be used for the rest of the analysis
+nrow(cIncomeDat)
+
+
+dm <- model.matrix(~.+0, data=cIncomeDat)
+
+#We have one variable (workclass never worked) with no values, we will remove this
+dm <- dm[,-4]
+
+summary(dm)
+
+pr <- prcomp(dm,scale=TRUE)
+par(mfrow=c(1,1))
+biplot(pr,cex=.5)
+#From the biplot, it looks like Sex, and Region contribute heavily to the second principal component
+
+plot(pr)
+#We can see that the first two principal components to a good job of explaining a lot of the variance. However, we see that the data may not be so easily separable after that
+
+plot(pr$x[,1:2], col=Cols(cIncomeDat$class))
+#The class seems to be rather well defined by the second principal component
+
+plot(pr$x[,1:2], col=Cols(cIncomeDat$sex))
+#Gender is rather well defined by the second principal component but not nearly as well separated as class
+
+#Top 5 contributers to PC1 and PC2 respectively
+sort(abs(pr$rotation[,1]),decreasing=T)[1:5]
+sort(abs(pr$rotation[,2]),decreasing=T)[1:5]
+
+set.seed(5124)
+
+#holding out 20% for the test set
+gTrain <- sample(c(FALSE,TRUE,TRUE,TRUE,TRUE),nrow(cIncomeDat),replace=TRUE)
+
+train <- cIncomeDat[gTrain,]
+test <- cIncomeDat[!gTrain,]
+
+```
+
+```{r include=FALSE}
+
+#Writing out for use of other problems
+write.table(train,file="train.csv")
+write.table(test,file="test.csv")
+```
+

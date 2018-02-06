@@ -1,0 +1,107 @@
+---
+title: 'CSCI E-63C: Final Exam'
+output:
+  html_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+library(dplyr)
+library(reshape2)
+library(ggplot2)
+library(countrycode)
+library(randomForest)
+library(stringr)
+library(e1071)
+```
+
+# Problem 3: random forest (25 points)
+
+Develop random forest model of the categorized income. Present variable importance plots and comment on relative importance of different attributes in the model.  Did attributes showing up as more important in random forest model also appear as significantly associated with the outcome by logistic regression?  Test model performance on multiple splits of data into training and test subsets, compare test and out-of-bag error estimates, summarize model performance in terms of accuracy/error, sensitivity/specificity and compare to the performance of other methods reported in the dataset description.
+
+```{r include=FALSE}
+#function to create metrics of interest
+assess=function(truth,predicted) {
+  truth = truth[!is.na(truth)]
+  truth = truth[!is.na(predicted)]
+  predicted = predicted[!is.na(predicted)] 
+  TP = sum(truth==1 & predicted==1) 
+  TN = sum(truth==0 & predicted==0) 
+  FP = sum(truth==0 & predicted==1) 
+  FN = sum(truth==1 & predicted==0) 
+  P = TP+FN # total positives
+  N = FP+TN  # total negatives
+  list(
+   accuracy = signif(100*(TP+TN)/(P+N),3),
+   error =  signif(100*(FP+FN)/(P+N),3),
+   sensitivity=signif(100*TP/P,3),
+   specificity=signif(100*TN/N,3)
+  )
+}
+
+train <- read.table("train.csv")
+perf <- read.table("perf.csv")
+
+```
+
+
+```{r}
+
+
+#Trying out with 1000 trees and varying levels of mtry
+set.seed(1234)
+rfRes <- randomForest(class~., ntree=1000, data = train,mtry=c(1,2,5,10,20,50,100,200))
+
+table(train$class,predict(rfRes))
+assess(train$class==">50K",predict(rfRes)==">50K")
+
+print(rfRes)
+
+plot(rfRes)
+#We can see that the error tails off quickly, so the default 500 trees is probably overkill
+
+#Most important features
+varImpPlot(rfRes)
+
+#The variable selection is comparable to what we saw in logistic regression. Although it was hard to tell from the logistic regression output as it showed the importance of each of the constituent variable factors. We did see however, that race was the weakest feature, that is the same as we see here.
+
+#Tuning to find an optimal value for mtry
+tune.rf <- tuneRF(train[,-12],train[,12], stepFactor=0.5)
+plot(tune.rf)
+
+#Based on the selection above, we will use mtry=3 and ntree=200
+
+set.seed(345)
+rfTmp <-NULL
+for ( iSim in 1:30) {
+    bTrain <- sample(c(FALSE,TRUE,TRUE),nrow(train),replace=TRUE)
+    rfTrain <- randomForest(class~.,data=train[bTrain,],ntree=200,mtry=3)
+    rfTestPred <- predict(rfTrain, newdata=train[!bTrain,]) 
+    tmpVals <- assess(train[!bTrain,]$class==">50K",rfTestPred==">50K")
+    rfTmp <- rbind(rfTmp,data.frame(iSim,tmpVals,mean.oob= mean(rfTrain$err.rate[,1])*100))
+}
+
+melt(rfTmp,id.vars="iSim") %>% ggplot(aes(x=variable,y=value,colour=variable)) + geom_boxplot() + ggtitle("Random Forest")
+
+#we still see very little variance in all metrics, in fact, in terms of accuracy, error, sensitivity and specificity, it has a similar profile that logistic regression. Our mean OOB error is very close to our test error
+
+perf <- rbind(perf, data.frame(algo="Random Forest",err=mean(rfTmp$error)))
+kable(perf)
+
+
+ggplot(perf,aes(x=algo,y=err)) + geom_point() + theme(axis.text.x = element_text(angle = 90, hjust = 1)) +labs(x="Algorithm",y="Error")
+
+#Performance wise, this is the best performing model so far. Its quite a bit better than the logisitic model. This suggests that the decision boundary is probably not quite linear, but a bit more complex. That KNN with small values of K have performed quite poorly, I think it probably doesnt have a huge variance.
+
+```
+
+```{r include=FALSE}
+
+#Writing out for use of other problems
+write.table(rfTmp,file="rfTmp.csv")
+write.table(perf,file="perf.csv")
+```
+
+

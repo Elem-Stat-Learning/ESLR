@@ -1,0 +1,86 @@
+---
+title: "CSCI-E63C: Week 10 Q&A section"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(ISLR)
+library(MASS)
+library(randomForest)
+library(ggplot2)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Ch.8.3.3 and Ex.7
+
+```{r}
+dim(Boston)
+#?Boston
+head(Boston)
+pairs(Boston)
+set.seed(1)
+train = sample (1:nrow(Boston), nrow(Boston)/2)
+# regression tree!
+bag.boston=randomForest(medv~.,data=Boston,subset=train, mtry=13,importance=TRUE)
+bag.boston
+yhat.bag = predict (bag.boston,newdata=Boston[-train,])
+boston.test=Boston[-train ,"medv"] 
+plot(yhat.bag , boston.test)
+mean((yhat.bag -boston.test)^2)
+set.seed(1)
+rf.boston=randomForest(medv~.,data=Boston,subset=train, mtry=6,importance=TRUE)
+yhat.rf = predict(rf.boston ,newdata=Boston[-train,])
+mean((yhat.rf-boston.test)^2)
+dfTmp <- NULL
+for ( iSim in 1:30 ) {
+  trainIdx <- sample(nrow(Boston), nrow(Boston)/2)
+  for ( mTry in c(13,6,3) ) {
+    rfTmp <- randomForest(medv~.,data=Boston,subset=trainIdx, mtry=mTry)
+    rfTestPred <- predict(rfTmp,newdata=Boston[-trainIdx,])
+    mseTest <- mean((Boston[-trainIdx,"medv"]-rfTestPred)^2)
+    dfTmp <- rbind(dfTmp,data.frame(mse=mseTest,mtry=mTry))
+    ##cat(iSim,mTry,mseTest,fill=TRUE)
+  }
+}
+ggplot(dfTmp,aes(x=factor(mtry),y=mse))+geom_boxplot()+geom_jitter()
+rf.boston=randomForest(medv~.,data=Boston,subset=train,importance=TRUE)
+importance(rf.boston)
+varImpPlot(rf.boston)
+partialPlot(rf.boston,x.var="rm",pred.data = Boston)
+partialPlot(rf.boston,x.var="lstat",pred.data = Boston)
+# frame as classification:
+Boston$highCrime <- factor(Boston$crim>median(Boston$crim))
+rfHCbos <- randomForest(highCrime~.,Boston,importance=TRUE)
+rfHCbos
+varImpPlot(rfHCbos)
+rfHCbosWoCrim <- randomForest(highCrime~.,Boston[,colnames(Boston)!="crim"],importance=TRUE)
+rfHCbosWoCrim
+plot(rfHCbosWoCrim)
+varImpPlot(rfHCbosWoCrim)
+partialPlot(rfHCbosWoCrim,x.var="nox",pred.data = Boston)
+partialPlot(rfHCbosWoCrim,x.var="nox",pred.data = Boston,which.class = "FALSE")
+partialPlot(rfHCbosWoCrim,x.var="nox",pred.data = Boston,which.class = "TRUE")
+partialPlot(rfHCbosWoCrim,x.var="indus",pred.data = Boston,which.class="TRUE")
+partialPlot(rfHCbosWoCrim,x.var="rad",pred.data = Boston,which.class = "TRUE")
+plot(Boston[,c("nox","indus")])
+plot(Boston[,c("nox","crim")],log="xy")
+# OOB error:
+table(predict(rfHCbosWoCrim),Boston$highCrime)
+# overfit!!!:
+table(predict(rfHCbosWoCrim,newdata=Boston),Boston$highCrime)
+dfTmp <- NULL
+for ( iSim in 1:100 ) {
+  trainIdx <- sample(nrow(Boston), nrow(Boston)/2)
+  for ( mTry in c(13,6,3) ) {
+    rfTmp <- randomForest(highCrime~.,data=Boston[,-grep("crim",colnames(Boston))],subset=trainIdx, mtry=mTry)
+    tblTmpTrain <- rfTmp$confusion[,1:2]
+    errTrain <- 1 - sum(diag(tblTmpTrain)) / sum(tblTmpTrain)
+    rfTestPred <- predict(rfTmp,newdata=Boston[-trainIdx,-grep("crim",colnames(Boston))])
+    tblTmpTest <- table(rfTestPred,Boston[-trainIdx,"highCrime"])
+    errTest <- 1 - sum(diag(tblTmpTest)) / sum(tblTmpTest)
+    dfTmp <- rbind(dfTmp,data.frame(mtry=mTry,type=c("train","test"),err=c(errTrain,errTest)))
+    ##cat(iSim,mTry,errTrain,errTest,fill=TRUE)
+  }
+}
+ggplot(dfTmp,aes(x=factor(mtry),y=err))+geom_boxplot()+geom_jitter()+facet_wrap(~type)
+```

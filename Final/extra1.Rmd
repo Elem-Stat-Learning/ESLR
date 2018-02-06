@@ -1,0 +1,37 @@
+---
+title: "extra1"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(knitr)
+library(dplyr)
+library(reshape2)
+library(ggplot2)
+library(countrycode)
+library(randomForest)
+library(stringr)
+library(e1071)
+
+```
+
+
+# Extra 10 points: KNN model
+
+Develop KNN model for this data, evaluate its performance for different values of $k$ on different splits of the data into training and test and compare it to the performance of other methods reported in the dataset description.  Notice that this dataset includes many categorical variables as well as continuous attributes measured on different scales, so that the distance has to be defined to be meaningful (probably avoiding subtraction of the numerical values of multi-level factors directly or adding differences between untransformed age and capital gain/loss attributes).
+```{r}
+
+ 
+dfTmp <- NULL
+for ( iSim in 1:30 ) {
+  trainIdx <- sample(nrow(dbaDat),nrow(dbaDat),replace=TRUE)
+  knnTuneRes <- tune.knn(dbaDat[trainIdx,-ncol(dbaDat)],dbaDat[trainIdx,ncol(dbaDat)],k=1:10)
+  knnTestRes <- knn(dbaDat[trainIdx,-ncol(dbaDat)],dbaDat[-trainIdx,-ncol(dbaDat)],dbaDat[trainIdx,ncol(dbaDat)],k=knnTuneRes$best.parameters[,"k"])
+  tblTmp <- table(dbaDat[-trainIdx,"auth"],knnTestRes)
+  #print(tblTmp)
+  dfTmp <- rbind(dfTmp,data.frame(attr=c("k","err0","err1","errTot"),value=c(knnTuneRes$best.parameters[,"k"],tblTmp[1,2]/sum(tblTmp[1,]),tblTmp[2,1]/sum(tblTmp[2,]),1-sum(diag(tblTmp))/sum(tblTmp))))
+}
+
+```

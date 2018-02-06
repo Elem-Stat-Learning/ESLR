@@ -1,0 +1,215 @@
+Decision Trees
+
+
+```{r}
+
+library(tree) #used to create classification and regression trees
+library(ISLR)
+
+attach(Carseats)
+
+#Sales is a continuous variable so recoding to categorical
+
+High <- ifelse(Sales<=8,"No","Yes")
+
+Carseats <- data.frame(Carseats, High)
+
+
+#using the tree function to fit a classification tree in order to predict High, using all variables excluding Sales
+
+tree.carseats <- tree(High~.-Sales, Carseats)
+summary(tree.carseats)
+#Misclassification error is the training Error
+
+#A tree with a small deviance indicates a tree that provides a good fit to the training data
+
+#print the tree
+plot(tree.carseats)
+#add the labels
+text(tree.carseats, pretty=0)
+
+
+tree.carseats
+#branches that lead to terminal nodes are indicated with asterisks
+
+#split into training and test sets to calculate test error rates
+
+set.seed(2)
+train <- sample(1:nrow(Carseats),200)
+Carseats.test <- Carseats[-train,]
+
+High.test <- High[-train]
+tree.carseats <- tree(High~.-Sales, Carseats, subset = train)
+tree.pred <- predict(tree.carseats, Carseats.test, type="class")
+table(tree.pred, High.test)
+
+(86+57)/200
+#Correctly predicts around 71.5%
+
+set.seed(3)
+#Prune.misclass option indicates we want the classification error rate to guide the cross-validation and pruning process
+cv.carseats <- 
+  cv.tree(tree.carseats,FUN=prune.misclass)
+names(cv.carseats)
+
+
+cv.carseats
+#dev correspons to the cross-validation error rate
+#the tree with 9 terminal nodes ives the lowest cross-validation error rate
+
+par(mfrow=c(1,2))
+plot(cv.carseats$size, cv.carseats$dev, type="b")
+plot(cv.carseats$k, cv.carseats$dev, type="b")
+
+#pruning to nine nodes
+prune.carseats <- prune.misclass(tree.carseats, best = 9)
+plot(prune.carseats)
+text(prune.carseats,pretty = 0)
+
+
+#We check how well this pruned tree works on the test data
+tree.pred <- predict(prune.carseats, Carseats.test, type="class")
+table(tree.pred, High.test)
+
+(94+60)/200
+
+#about 6% better than what we saw previously
+
+
+
+```
+
+
+Regression Trees
+
+```{r}
+#Fitting a regression tree to Boston dataset
+
+library(MASS)
+head(Boston)
+
+#First, fit to training dataset
+set.seed(1)
+train <- sample(1:nrow(Boston), nrow(Boston)/2)
+tree.boston <- tree(medv~., Boston, subset=train)
+summary(tree.boston)
+
+#Only 3 of the variables have been used to construct the tree
+par(mfrow=c(1,1))
+plot(tree.boston)
+text(tree.boston, pretty=0)
+
+#lstat measures the percentage of people in lower economic status. We can see that lower values of lstat corresponds to more expensive houses
+
+#we can run cv.tree to see if the tree is worth pruning
+cv.boston <- cv.tree(tree.boston)
+plot(cv.boston$size, cv.boston$dev, type="b")
+
+cv.boston
+#So, here the most complex tree has been selected by cross-validation. We can still prune if we want
+
+prune.boston <- cv.tree(tree.boston, best=5)
+plot(prune.boston)
+text(prune.boston, pretty=0)
+
+#Lets just use the unpruned tree to make predictions on the test dataset
+
+yhat <- predict(tree.boston, newdata = Boston[-train,])
+boston.test <- Boston[-train, "medv"]
+plot(yhat, boston.test)
+abline(0,1)
+
+
+#RMSE, indicating that this model leads to predictions that are within around 5k USD of the true median
+sqrt(mean((yhat-boston.test)^2))
+```
+
+
+Bagging and Random Forests
+
+```{r}
+library(randomForest)
+set.seed(1)
+
+bag.boston <- randomForest(medv ~.,data=Boston, subset = train, mtry=13, importance=TRUE)
+
+#mtry=13 says to consider all 13 predictors for each split of the tree-in other words, bagging should be done.
+bag.boston
+
+
+#How well does this perform?
+yhat.bag <- predict(bag.boston, newdata=Boston[-train,])
+plot(yhat.bag, boston.test)
+abline(0,1)
+mean((yhat.bag-boston.test)^2)
+
+#Test MSE is 13.16, almost half of what was observed for pruned tree
+
+#we can change the number of trees using the ntree argument
+
+bag.boston <- randomForest(medv~., data=Boston, subset = train, mtry=13, ntree=25)
+yhat.bag <- predict(bag.boston, newdata = Boston[-train,])
+mean((yhat.bag-boston.test)^2)
+
+bag.boston
+
+
+#growing a random forest, we use a smaller value mtry. By default randomforest uses p/3 variables when building a random forest of regression trees
+
+set.seed(1)
+rf.boston <- randomForest(medv~., data=Boston, subset=train, mtry=6, importance=TRUE)
+yhat.rf <- predict(rf.boston, newdata=Boston[-train,])
+mean((yhat.rf-boston.test)^2)
+
+#the MSE is 11.45, showing that random forest yields an impovement over the bagging
+
+#using the importance function, we can see the importance of each variable
+
+importance(rf.boston)
+varImpPlot(rf.boston)
+#Shows that house size (rm) and wealth level of the community (lstat) are the most important predictors of median value of house
+
+
+
+
+```
+
+Boosting
+
+```{r}
+#using the gbm package from gbm
+
+library(gbm)
+set.seed(1)
+
+#n.trees = number of trees to create
+#interaction.depth = limits the depth of each tree
+boost.boston <- gbm(medv~., data=Boston[train,], distribution="gaussian", n.trees=5000, interaction.depth=4)
+
+#guassian distribution used for regression, binomial for binary classification
+summary(boost.boston)
+#summary produces relative influence
+
+
+par(mfrow=c(1,2))
+plot(boost.boston, i="rm")
+plot(boost.boston, i="lstat")
+
+#now use the boosted model to predict medv on test data
+
+yhat.boost <- predict(boost.boston, newdata = Boston[-train,], n.trees=5000)
+mean((yhat.boost-boston.test)^2)
+
+#test MSE is similar to the test MSE for random forests and superior to that of bagging. If we want, we can perform boosting with a different value of the shrinkage paramater lambda (default is 0.001)
+
+boost.boston <- gbm(medv~., data=Boston[train,], distribution = "gaussian", n.trees = 5000, interaction.depth = 4, shrinkage = 0.2, verbose = F)
+
+yhat.boost <- predict(boost.boston, newdata = Boston[-train,], n.trees = 5000)
+
+mean((yhat.boost-boston.test)^2)
+
+#In this case, using lambda of .2 leads to a slightly lower test MSE
+
+
+```
+

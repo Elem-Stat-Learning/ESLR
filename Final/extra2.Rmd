@@ -1,0 +1,22 @@
+---
+title: "extra2"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(caret)
+```
+# Extra 15 points: variable importance in SVM
+
+SVM does not appear to provide readily available tools for judging relative importance of different attributes in the model.  Please evaluate here an approach similar to that employed by random forest where importance of any given attribute is measured by the decrease in model performance upon randomization of the values for this attribute.
+```{r}
+
+library(caret)
+
+
+model_svm  <- train(train[,-12], train[,12], method='svmRadial' , verbose=F) # Support Vector Machines
+varImp(model_svm)
+
+
+```

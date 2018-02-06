@@ -1,0 +1,291 @@
+---
+title: "ISLR_classification"
+output: html_document
+---
+
+#Stock market data
+
+Attempt to predict direction of stock market, either up or down
+
+
+```{r}
+
+library(ISLR)
+
+names(Smarket)
+dim(Smarket)
+summary(Smarket)
+
+#all pairwise correlations
+#for numerics, remove Direction variable
+cor(Smarket[,-9])
+
+#Very little correlation observed between lag variables
+#and todays return (previous days return vs today)
+#Year and volume appear correlated
+
+
+attach(Smarket)
+plot(Volume)
+#Index is ordered by year, we can see that Volume increases over time
+
+
+```
+
+Logistic Regression
+We will try to predict direction of stock market (Up/down) using logistic regression
+
+
+```{r}
+
+glm.fit <- glm(Direction~Lag1+Lag2+Lag3+Lag4+Lag5+Volume, data=Smarket, family=binomial)
+
+summary(glm.fit)
+
+#The smallest p-value is given by Lag1, with a negative coefficient, suggesting that if the market had a positive return yesterday, then it is less likely to go up today. However it is not significant, so we cannot infer any real association
+
+
+#How to access coefficients, and other aspects of the model
+coef(glm.fit)
+summary(glm.fit)
+
+#predict function used to predict the prob that the market will go up, given the value of the predictors
+# type=response option tells R to return the prob instead of the logit
+
+glm.probs <- predict(glm.fit, type="response")
+glm.probs[1:10]
+
+#Check via contrasts on the dummy variable that R has created to make sure that 1 is assigned to Up, so this is prob of up
+contrasts(Direction)
+
+#We need to convert the prob into the classes, up or down
+#using a boundary of .5
+
+glm.pred <- rep("Down",length(glm.probs))
+glm.pred[glm.probs > .5] <- "Up"
+
+#Confusion matrix
+#Diagonal indicate correct predictions
+table(glm.pred, Direction)
+
+#Accuracy, how often was the logistic regression correct
+mean(glm.pred == Direction)
+
+#roughly 52% of the time, is the training set error, so this is misleadingly high
+
+1-.5216
+#is the training set error
+#we would like to find the test error rate
+
+#Creating a sepearate training and test set
+train <- (Year < 2005)
+
+#test set is of 2005 data
+Smarket.2005 <- Smarket[!train,]
+dim(Smarket.2005)
+
+Direction.2005 <- Direction[!train]
+
+
+# Re-running log reg on the training subset
+glm.fit <- glm(Direction~Lag1+Lag2+Lag3+Lag4+Lag5+Volume, data=Smarket, subset=train, family=binomial)
+
+# Prediction is performed on the test data
+glm.probs <- predict(glm.fit, Smarket.2005, type="response")
+
+glm.pred <- rep("Down", length(glm.probs))
+glm.pred[glm.probs > .5] <- "Up"
+
+
+table(glm.pred, Direction.2005)
+
+#Test error rate
+mean(glm.pred != Direction.2005)
+#Worse than guessing!
+
+
+#We observed that most variables had very low p-values, by removing unnecessary variables, we can reduce the variance and the test error
+
+glm.fit <- glm(Direction~Lag1+Lag2, data=Smarket, family = "binomial", subset = train)
+
+glm.probs <- predict(glm.fit, Smarket.2005, type = "response")
+glm.pred <- rep("Down", length(glm.probs))
+glm.pred[glm.probs > .5] <- "Up"
+
+
+table(glm.pred, Direction.2005)
+mean(glm.pred != Direction.2005)
+
+#Test error rate of 44%, improvement over what we had
+#Although we should prob use a better method, such as k-fold cross validation to minimize the chance it was due to chance.
+
+#Custom prediction
+
+predict(glm.fit, newdata = data.frame(Lag1=c(1.2,1.5),
+                                      Lag2=c(1.1,-0.8)),
+                                      type="response")
+
+```
+
+Linear Discriminant Analysis
+
+```{r}
+library(MASS)
+
+lda.fit <- lda(Direction~Lag1+Lag2, data=Smarket, subset=train)
+
+lda.fit
+#from the prior prob, we can see that 49% of the training observations correspond to when the market went down
+
+#From the group means, we can see that previous days return tends to be negative when market is up
+#Conversely, market tends to be down if previous days were up
+
+lda.pred <- predict(lda.fit, Smarket.2005)
+names(lda.pred)
+lda.class <- lda.pred$class
+
+table(lda.class, Direction.2005)
+mean(lda.class != Direction.2005)
+
+#predictions from LDA and Logistic Regression are identical
+
+#Applying the 50% threshold to the posterior prob, allows us to recreate the values of lda.pred$class
+sum(lda.pred$posterior[,1]>=.5)
+
+sum(lda.pred$posterior[,1]<.5)
+
+
+lda.pred$posterior[1:20, 1]
+lda.class[1:20]
+
+#Here the label Up has been set to the decrease
+
+#suppose we want to predict market decrease only if we are certain the maket will decrease on that day, ie if the posterior prob is at least 90%
+sum(lda.pred$posterior[,1]>.9)
+```
+
+Quadratic Discriminant Analysis
+
+
+```{r}
+qda.fit <- qda(Direction ~Lag1 + Lag2, data=Smarket, subset = train)
+
+qda.fit
+
+#No coefficients given, as its quadratic, not a linear model
+
+qda.class <- predict(qda.fit, Smarket.2005)$class
+table(qda.class, Direction.2005)
+
+mean(qda.class != Direction.2005)
+#Accuracy of almost 60%, much better than the linear models, suggesting that the underlying relationship of the stock market is closer to quadratic than linear
+
+
+```
+
+
+K-Nearest Neighbours
+
+```{r}
+library(class)
+
+#knn function does training and testing as part of the same commmand
+
+#For arguments:
+#1) Matrix contianing predictors with the training data
+#2) Matrix containing predictions
+#3) Vector containing class labels for the training data
+#4) Number of nearest neighbours to use
+
+train.X <- cbind(Lag1, Lag2)[train,]
+test.X <- cbind(Lag1, Lag2)[!train,]
+train.Direction <- Direction[train]
+
+#Set a seed to control the random sample to break ties
+set.seed(1)
+knn.pred <- knn(train.X, test.X, train.Direction, k=1)
+table(knn.pred, Direction.2005)
+
+#K=1 is as good as random, trying again with K=3
+set.seed(1)
+knn.pred <- knn(train.X, test.X, train.Direction, k=3)
+table(knn.pred, Direction.2005)
+
+#Only slight increase in performance, turns out for this dataset that QDA is the best performing
+
+
+```
+
+An Application to Caravan Insurance Data
+
+Applying KNN to caravan dataset in ISLR
+```{r}
+dim(Caravan)
+attach(Caravan)
+summary(Purchase)
+
+#KNN is affected by scale, so we we can try scaling first
+#Remove qualitative variable
+standardized.X <- scale(Caravan[,-86])
+var(Caravan[,1])
+
+#Variance has been standardized to 1
+var(standardized.X[,1])
+
+
+#Create a test set of 1000 obs, remaining is for training set
+
+test <- 1:1000
+train.X <- standardized.X[-test,]
+test.X <- standardized.X[test,]
+train.Y <- Purchase[-test]
+test.Y <- Purchase[test]
+
+set.seed(1)
+knn.pred <- knn(train.X, test.X, train.Y, k=1)
+mean(test.Y != knn.pred)
+
+
+#Test error rate is 12%, which may appear good, but the original dataset only had ~6% of customers with a Yes, predicting No for all, would have given a test error rate of 6%
+348/(348+5474)
+
+knn.pred <- knn(train.X, test.X, train.Y, k=5)
+mean(test.Y != knn.pred)
+table(knn.pred, test.Y)
+#KNN is finding some real patterns here
+
+m <- numeric(20)
+for (i in 1:20){
+  set.seed(1)
+  knn.pred <- knn(train.X, test.X, train.Y, k=i)
+  m[i] = mean(test.Y != knn.pred)
+}
+
+which.min(m)
+
+plot(m)
+
+
+#As a comparison, we will fit a logistic model
+# We shouldnt use a cutoff of .5 as only 7 
+
+glm.fit <- glm(Purchase~., data=Caravan, family=binomial, subset=-test.X)
+glm.probs <- predict(glm.fit, Caravan[test,], type="response")
+
+glm.pred <- rep("No", 1000)
+glm.pred[glm.probs>.5]="Yes"
+
+table(glm.pred, test.Y)
+
+
+glm.pred <- rep("No", 1000)
+glm.pred[glm.probs>.25]="Yes"
+
+table(glm.pred, test.Y)
+
+#prob insurance is purchased when we think it
+11/(22+11)
+```
+
+
+

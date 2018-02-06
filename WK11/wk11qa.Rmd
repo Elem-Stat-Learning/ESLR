@@ -1,0 +1,241 @@
+---
+title: "CSCI-E63C: Week 11 Q&A section"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(ISLR)
+library(e1071)
+library(ROCR)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Ch.9.6.1 -- Support Vector Classifier
+
+```{r}
+set.seed (1)
+nObs <- 10
+x <- matrix (rnorm (2*nObs*2) , ncol =2)
+y <- c(rep (-1,nObs) , rep (1 ,nObs) )
+x[y==1 ,] <- x[y==1,] + 1
+# not linearly separable:
+plot(x, col =(3-y))
+# outcome has to be a factor:
+dat <- data.frame(x=x,y=as.factor(y))
+# cost=10, no scaling this time:
+svmfit <- svm(y~., data=dat, kernel="linear", cost=10, scale=FALSE)
+# one(?) misclassification, "X" indicates SV:
+plot(svmfit,dat)
+# seven of them:
+svmfit$index
+summary(svmfit)
+table(predict(svmfit),y)
+
+# lower cost=0.1, wider margin, more SVs:
+svmfit <- svm(y~., data=dat, kernel="linear", cost=0.1, scale=FALSE)
+plot(svmfit,dat)
+# 16 of them:
+svmfit$index
+summary(svmfit)
+table(predict(svmfit),y)
+
+# tune cost by cross-validation:
+set.seed(1)
+tune.out <- tune(svm, y~., data=dat, kernel="linear", ranges=list(cost=c(0.001, 0.01, 0.1, 1, 5, 10, 100)))
+# cost=0.1 is the best:
+summary(tune.out)
+# best model:
+bestmod <- tune.out$best.model
+summary(bestmod)
+
+# test data set (try other than 10 nTestObs, compare to cost=0.01 below):
+nTestObs <- 1000
+xtest <- matrix (rnorm (2*nTestObs*2) , ncol =2)
+ytest <- sample (c(-1,1) , 2*nTestObs, rep=TRUE)
+xtest[ytest ==1,] <- xtest[ytest ==1,] + 1
+testdat <- data.frame(x=xtest, y=as.factor(ytest))
+
+ypred <-  predict(bestmod,testdat)
+table(predict=ypred, truth=testdat$y)
+
+# cost=0.01
+svmfit <- svm(y~., data=dat, kernel="linear", cost=0.01, scale=FALSE)
+# 20 SVs:
+plot(svmfit,dat)
+ypred <- predict(svmfit, testdat)
+table(predict=ypred, truth=testdat$y)
+
+# linearly (barely) separable case:
+x[y==1,] <- x[y==1,]+0.5
+plot(x, col=(y+5)/2, pch=19)
+
+dat <- data.frame(x=x,y=as.factor(y))
+# high cost for perfect separation:
+svmfit <- svm(y~., data=dat, kernel ="linear", cost=1e5)
+plot(svmfit,dat)
+summary(svmfit)
+# perfect:
+table(predict(svmfit),y)
+
+# test error:
+nTestObs <- 10000
+xtest <- matrix (rnorm (2*nTestObs*2) , ncol =2)
+ytest <- sample (c(-1,1) , 2*nTestObs, rep=TRUE)
+xtest[ytest ==1,] <- xtest[ytest ==1,] + 1 + 0.5
+testdat <- data.frame(x=xtest, y=as.factor(ytest))
+
+ypred <-  predict(svmfit,testdat)
+table(predict=ypred, truth=testdat$y)
+
+# lower cost, more SVs, one misclassification:
+svmfit <- svm(y~., data=dat, kernel="linear", cost=1)
+plot(svmfit,dat)
+summary(svmfit)
+table(predict(svmfit),y)
+# better performance on test data:
+ypred <-  predict(svmfit,testdat)
+table(predict=ypred, truth=testdat$y)
+```
+
+
+# Ch.9.6.2 -- Support Vector Machine
+
+```{r}
+set.seed(1)
+nObs <- 100
+x <- matrix(rnorm(2*nObs*2),ncol=2)
+x[1:nObs,] <- x[1:nObs,]+2
+x[nObs+(1:(nObs/2)),] <- x[nObs+(1:(nObs/2)),]-2
+y <- c(rep(1,1.5*nObs),rep(2,nObs/2))
+dat <- data.frame(x=x,y=as.factor(y))
+# non-linear decision boundary:
+plot(x,col=y,pch=y)
+
+train <- sample(2*nObs,nObs)
+# non-linear kernel, cost=1:
+svmfit <- svm(y~., data=dat[train,], kernel="radial", gamma=1, cost=1)
+plot(svmfit,dat[train,])
+summary(svmfit)
+table(predict(svmfit),dat[train,'y'])
+
+# cost=100K, more irregular decision boundary, fewer SVs, lower training error:
+svmfit <- svm(y~.,data=dat[train,],kernel="radial",gamma=1,cost=1e5)
+plot(svmfit,dat[train,])
+summary(svmfit)
+table(predict(svmfit),dat[train,'y'])
+
+# tune by cross-validation:
+set.seed(1)
+tune.out=tune(svm, y~., data=dat[train,], kernel="radial",ranges=list(cost=c(0.1,1,10,100,1000),gamma=c(0.5,1,2,3,4)))
+# best cost=1, gamma=2:
+summary (tune.out)
+# 10/100 misclassifications:
+table(true=dat[-train ,"y"],pred=predict(tune.out$best.model,newdata=dat[-train ,]))
+# 13/100 misclassifications for high cost model:
+table(true=dat[-train ,"y"],pred=predict(svmfit,newdata=dat[-train ,]))
+```
+
+
+# Ch.9.6.3 -- ROC curves
+
+```{r}
+# wrap ROCR functions:
+rocplot <- function(pred, truth, ...) {
+  predob <- prediction(pred, truth)
+  perf <- performance(predob, "tpr", "fpr")
+  plot(perf ,...)
+}
+
+# best model:
+svmfit.opt <- svm(y~., data=dat[train,], kernel="radial", gamma=2, cost=1, decision.values=TRUE)
+plot(svmfit.opt,dat[train,])
+table(predict(svmfit.opt),dat[train,"y"])
+
+# more flexible model (higher gamma):
+svmfit.flex <- svm(y~., data=dat[train,], kernel="radial", gamma=50, cost=1, decision.values=TRUE)
+plot(svmfit.flex,dat[train,])
+table(predict(svmfit.flex),dat[train,"y"])
+
+# ROC curves for training and test predictions:
+old.par <- par(mfrow=c(1,2))
+fitted.opt <- attributes(predict(svmfit.opt ,dat[train,], decision.values =TRUE))$decision.values
+fitted.flex <- attributes(predict(svmfit.flex,dat[train,], decision.values=TRUE))$decision.values
+rocplot(fitted.opt,dat[train,"y"], main="Training Data")
+rocplot(fitted.flex,dat[train,"y"], add=TRUE,col ="red ")
+legend("bottomright",c("gamma=2","gamma=50"),col=1:2,text.col=1:2,lty=1) 
+fitted.opt <- attributes(predict(svmfit.opt ,dat[-train,], decision.values =TRUE))$decision.values
+fitted.flex <- attributes(predict(svmfit.flex,dat[-train,], decision.values=TRUE))$decision.values
+rocplot(fitted.opt,dat[-train,"y"], main="Test Data")
+rocplot(fitted.flex,dat[-train,"y"], add=TRUE,col ="red ")
+legend("bottomright",c("gamma=2","gamma=50"),col=1:2,text.col=1:2,lty=1) 
+par(old.par)
+```
+
+
+# Ch.9.6.4 -- SVM with multiple classes
+
+```{r}
+set.seed(1)
+# add points for the third class:
+x <- rbind(x,matrix(rnorm(50*2),ncol=2))
+y <- c(y,rep(0,50))
+x[y==0,2] <- x[y==0,2]+2
+dat <- data.frame(x=x,y=as.factor(y))
+plot(x,col=(y+1),pch=(y+1))
+svmfit <- svm(y~.,data=dat,kernel="radial",cost=10, gamma=1)
+plot(svmfit,dat)
+```
+
+# Ch.9.6.5 -- gene expression data
+
+```{r}
+names(Khan)
+dim(Khan$xtrain)
+dim(Khan$xtest)
+length(Khan$ytrain)
+length(Khan$ytest)
+table(Khan$ytrain)
+table(Khan$ytest)
+dat <- data.frame(x=Khan$xtrain, y=as.factor(Khan$ytrain))
+out <- svm(y~., data=dat, kernel="linear", cost=10)
+summary(out)
+table(out$fitted,dat$y)
+dat.te <- data.frame(x=Khan$xtest, y=as.factor(Khan$ytest))
+pred.te <- predict(out,newdata=dat.te)
+table(pred.te,dat.te$y)
+
+KhanAllDat <- data.frame(x=rbind(Khan$xtrain,Khan$xtest),y=as.factor(c(Khan$ytrain,Khan$ytest)))
+# repeatedly draw training and test data stratified by cell type;
+testPred <- NULL
+testTruth <- NULL
+for ( iSim in 1:10 ) {
+  trainIdx <- NULL
+  varIdx <- c(sample(ncol(KhanAllDat)-1,ncol(KhanAllDat)/5),ncol(KhanAllDat))
+  for ( iClass in levels(KhanAllDat$y)) {
+    trainIdx <- c(trainIdx,sample((1:nrow(KhanAllDat))[KhanAllDat$y==iClass],sum(KhanAllDat$y==iClass),replace=TRUE))
+  }
+  svmTrain <- svm(y~., data=KhanAllDat[trainIdx,varIdx], kernel="linear", cost=10)
+  #testPred <- c(testPred,attributes(predict(svmTrain,newdata=KhanAllDat[-trainIdx,], decision.values=TRUE))$decision.values)
+  testPred <- c(testPred,predict(svmTrain,newdata=KhanAllDat[-trainIdx,varIdx]))
+  testTruth <- c(testTruth,KhanAllDat[-trainIdx,"y"])
+}
+#rocplot(testPred,testTruth, main="Test Data")
+table(pred=testPred,truth=testTruth)
+plot(cmdscale(as.dist(1-cor(t(KhanAllDat[,-ncol(KhanAllDat)]),method="spearman"))),col=as.numeric(KhanAllDat$y))
+```
+
+
+# Ch.9.7, Ex.7
+
+```{r}
+class(Auto)
+dim(Auto)
+summary(Auto)
+Auto$mpgCtg <- factor(Auto$mpg>median(Auto$mpg))
+tune.out=tune(svm, mpgCtg~., data=Auto[,c("cylinders","displacement","horsepower","weight","acceleration","year","mpgCtg")], kernel="linear",ranges=list(cost=c(0.1,1,10,100,1000)))
+summary(tune.out)
+tune.out=tune(svm, mpgCtg~., data=Auto[,c("cylinders","displacement","horsepower","weight","acceleration","year","mpgCtg")], kernel="radial",ranges=list(cost=c(0.1,1,10,100,1000),gamma=c(0.5,1,2,3,4)))
+summary(tune.out)
+tune.out=tune(svm, mpgCtg~., data=Auto[,c("cylinders","displacement","horsepower","weight","acceleration","year","mpgCtg")], kernel="polynomial",ranges=list(cost=c(0.1,1,10,100,1000),degree=c(2,3),coef0=c(0,0.5,1,2,3,4)))
+summary(tune.out)
+```

@@ -1,0 +1,80 @@
+---
+title: "problem5"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+library(dplyr)
+library(reshape2)
+library(ggplot2)
+library(countrycode)
+library(randomForest)
+library(stringr)
+library(e1071)
+library(ROCR)
+
+lrTmp <- read.table("lrTmp.csv")
+rfTmp <- read.table("rfTmp.csv")
+svTmp <- read.table("svTmp.csv")
+
+train <- read.table("train.csv")
+test <- read.table("test.csv")
+
+
+assess=function(truth,predicted) {
+  truth = truth[!is.na(truth)]
+  truth = truth[!is.na(predicted)]
+  predicted = predicted[!is.na(predicted)] 
+  TP = sum(truth==1 & predicted==1) 
+  TN = sum(truth==0 & predicted==0) 
+  FP = sum(truth==0 & predicted==1) 
+  FN = sum(truth==1 & predicted==0) 
+  P = TP+FN # total positives
+  N = FP+TN  # total negatives
+  list(
+   accuracy = signif(100*(TP+TN)/(P+N),3),
+   error =  signif(100*(FP+FN)/(P+N),3),
+   sensitivity=signif(100*TP/P,3),
+   specificity=signif(100*TN/N,3)
+  )
+}
+
+```
+
+
+# Problem 5: compare logistic regression, random forest and SVM model performance (5 points)
+
+Compare performance of the models developed above (logistic regression, random forest, SVM) in terms of their accuracy, error and sensitivity/specificity.  Comment on differences and similarities between them.
+
+
+```{r}
+tot <- rbind(lrTmp,rfTmp[,c(1:5)],svTmp)
+tot$lbl <- c(rep("log regression",30),rep("random forest",30),rep("SVM",30))
+
+tot %>% select(-iSim) %>% melt(id.vars="lbl") %>% ggplot(aes(x=lbl,y=value,group=lbl, col=lbl)) + geom_boxplot() + facet_wrap (~variable) +  theme(axis.text.x=element_blank(),axis.title.x=element_blank(),axis.title.y=element_blank())
+
+#As noted before, there is little in difference between the 3 methods. Random forest has the highest variance and the lowest error, mostly due to a slight increase in specitivity over the other two methods 
+
+
+#doing one last comparisson using the hold out test set
+glmTrain <- glm(class~.,data=train,family=binomial)
+glmTestPred <- predict(glmTrain, newdata=test[,-12], type="response") > 0.5
+glmVals <- assess(test$class==">50K",glmTestPred)
+
+rfTrain <- randomForest(class~.,data=train,ntree=200,mtry=3)
+rfTestPred <- predict(rfTrain, newdata=test[,-12]) 
+rfVals <- assess(test$class==">50K",rfTestPred==">50K")
+
+svTrain <- svm(class~.,data=train,kernel="radial",cost=1,gamma=.1)
+svTestPred <- predict(svTrain, newdata=test[,-12]) 
+svVals <- assess(test$class==">50K",svTestPred==">50K")
+
+
+kable(rbind(glmVals,rfVals,svVals))
+
+#On the final test set, random forest performed best, followed by SVM, followed by logistinc regression
+
+
+```

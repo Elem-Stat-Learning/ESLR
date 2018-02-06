@@ -1,0 +1,561 @@
+---
+title: "CSCI E-63C Week 9 assignment"
+output:
+  html_document:
+    toc: true
+---
+
+# Preface
+
+For this assignment we will use banknote authentication data (the one we worked with in week 2 assignment) to fit logistics regression model and evaluate performance of LDA, QDA and KNN classifiers.  As we have seen earlier this dataset should allow to predict which banknotes are authentic and which ones are forged fairly well, so we should expect to see low error rates for our classifiers.  Let's see whether some of those tools perform better than others on this data.
+
+# Problem 1 (10 points): logistic regression
+
+Fit logistic regression model of the class attribute using remaining four attributes as predictors in the model.  Produce summary of the model, describe which attributes appear to be significantly associated with the categorical outcome in this model.  Use this model to make predictions on the entire dataset and compare these predictions and corresponding true values of the class attribute using confusion matrix (i.e. contingency table).  Calculate error rate (would this be training or test error in this case?), sensitivity and specificity (assuming that we are predicting class "1").  Describe the results.
+
+```{r Problem_1}
+require(knitr)
+dbaDat <- read.table("data_banknote_authentication.txt",sep=",")
+colnames(dbaDat) <- c("var","skew","curt","entr","auth")
+dbaDat$auth <- factor(dbaDat$auth)
+dim(dbaDat)
+summary(dbaDat)
+head(dbaDat)
+
+
+#Fitting the logistic model
+logit.fit <- glm(auth ~.,data=dbaDat,family=binomial) 
+summary(logit.fit)
+
+#We can see that var, skew and curt were all highly significant in association with the outcome of this model, while entr was not
+
+#retrieving outcome probabilities of model fit on the entire dataset
+logit.prob <- predict(logit.fit,newdata=dbaDat,type="response")
+
+
+#classifying values as either 0 or 1, based on whether prob exceeded .5, judjing from the distribution of our classes this seems reasonable
+summary(dbaDat$auth)
+logit.pred <- factor((logit.prob > .5)*1)
+
+#Confusion matrix
+table(logit.pred, dbaDat$auth)
+
+
+assess.prediction=function(predicted,truth) {
+# check for missing values (we are going to
+# compute metrics on non-missing values only) predicted = predicted[ ! is.na(truth) ]
+truth = truth[ ! is.na(truth) ]
+truth = truth[ ! is.na(predicted) ]
+predicted = predicted[ ! is.na(predicted) ] 
+cat("Total cases that are not NA: ",
+         length(truth),"\n",sep="")
+   # overall accuracy of the test: how many cases
+   # (both positive and
+   # negative) we got right:
+   cat("Correct predictions (accuracy): ",
+     sum(truth==predicted),
+     "(",signif(sum(truth==predicted)*100/
+     length(truth),3),"%)\n",sep="")
+# how predictions align against known # training/testing outcomes:
+# TP/FP= true/false positives,
+# TN/FN=true/false negatives
+   TP = sum(truth==1 & predicted==1) 
+   TN = sum(truth==0 & predicted==0) 
+   FP = sum(truth==0 & predicted==1) 
+   FN = sum(truth==1 & predicted==0) 
+   P = TP+FN # total number of
+         # positives in the truth data
+   N = FP+TN  # total number of
+# negatives
+   cat("TPR (sensitivity)=TP/P: ",
+       signif(100*TP/P,3),"%\n",sep="")
+   cat("TNR (specificity)=TN/N: ",
+       signif(100*TN/N,3),"%\n",sep="")
+   cat("PPV (precision)=TP/(TP+FP): ",
+       signif(100*TP/(TP+FP),3),"%\n",sep="")
+   cat("FDR (false discovery)=1-PPV: ",
+       signif(100*FP/(TP+FP),3),"%\n",sep="")
+   cat("FPR =FP/N=1-TNR: ",
+      signif(100*FP/N,3),"%\n",sep="")
+}
+
+
+assess.prediction(logit.pred, dbaDat$auth)
+
+#The training error is .8%, we have an accuracy of 99.2
+trainError <- function(predicted, truth)mean(predicted!=truth)*100
+trainError(logit.pred,dbaDat$auth)
+#We expect the actual test error rates to be higher
+
+#Creating some function for easier plotting
+sensit <- function(predicted, truth){
+  TP = sum(truth==1 & predicted==1) 
+  FN = sum(truth==1 & predicted==0)      
+  P = TP+FN  
+  100*TP/P
+}
+
+specif <- function(predicted, truth){
+  TN = sum(truth==0 & predicted==0)  
+  FP = sum(truth==0 & predicted==1) 
+  N = FP+TN 
+  100*TN/N
+}
+
+
+logit.train.error <- trainError(logit.pred,dbaDat$auth)
+logit.specificity <- specif(logit.pred,dbaDat$auth)
+logit.sensitivity <- sensit(logit.pred,dbaDat$auth)
+
+#Confirming with the caret package
+library(caret)
+confusionMatrix(logit.pred, dbaDat$auth)
+
+#As we observed, entr was not a significant predictor, the model was re-run excluding this variable in the hope that it would minimize training error due to a reduction of variance. No such change was observed when re-running.
+
+
+```
+
+
+
+# Problem 2 (10 points): LDA and QDA
+
+Using LDA and QDA implementations available in the package `MASS`, calculate confusion matrix, (training) error rate, sensitivity and specificity for each of them.  Compare them to those of logistic regression.  Describe the results.
+
+```{r Problem_2}
+library(MASS)
+
+#Linear Discriminant Analysis
+lda.fit <- lda(auth ~ .,data=dbaDat)
+lda.fit
+lda.class <- predict(lda.fit, newdata = dbaDat)$class
+
+table(lda.class, dbaDat$auth)
+assess.prediction(lda.class, dbaDat$auth)
+
+lda.train.error <- trainError(lda.class,dbaDat$auth)
+lda.specificity <- specif(lda.class,dbaDat$auth)
+lda.sensitivity <- sensit(lda.class,dbaDat$auth)
+
+lda.train.error
+
+#Quadratic Discriminant Analysis
+qda.fit <- qda(auth ~ .,data=dbaDat)
+qda.class <- predict(qda.fit,dbaDat)$class
+
+table(qda.class, dbaDat$auth)
+assess.prediction(qda.class, dbaDat$auth)
+qda.train.error <- trainError(qda.class,dbaDat$auth)
+qda.specificity <- specif(qda.class,dbaDat$auth)
+qda.sensitivity <- sensit(qda.class,dbaDat$auth)
+
+qda.train.error
+
+
+# The training error rate of the logistic regression was .008 as oppossed to .02 and .015 from LDA and QDA respectively. Logistic regression was the best performer, followed by QDA, and LDA had a training error of almost double what was observed Logistic regression. We are seeing very good separation of data across these different methods
+
+#For the Logistic regression, sensitivity and specificity were the same, both at 99.2%
+
+#For both LDA and QDA, the specificity was 100%, but the sensitivity was lower than logistic regression for both
+
+
+```
+
+
+
+# Problem 3 (10 points): KNN
+
+Using `knn` from library `class`, calculate confusion matrix, (training) error rate, sensitivity/specificity for  one and ten nearest neighbors models.  Compare them to corresponding results from LDA, QDA and logistic regression. Describe results of this comparison -- discuss whether it is surprising to see low *training* error for KNN classifier with $k=1$.
+
+
+```{r Problem_3}
+library(class)
+
+
+#Set a seed to control the random sample to break ties
+set.seed(1)
+knn.pred <- knn(dbaDat[,-5], dbaDat[,-5], dbaDat$auth, k=1)
+table(knn.pred, dbaDat$auth)
+assess.prediction(knn.pred, dbaDat$auth)
+
+#K=10 is still a perfect match on the training set
+set.seed(1)
+knn.pred <- knn(dbaDat[,-5], dbaDat[,-5], dbaDat$auth, k=10)
+table(knn.pred, dbaDat$auth)
+assess.prediction(knn.pred, dbaDat$auth)
+
+#Some functions to make the plots
+knn.train.error <- trainError(knn.pred,dbaDat$auth)
+knn.specificity <- specif(knn.pred,dbaDat$auth)
+knn.sensitivity <- sensit(knn.pred,dbaDat$auth)
+
+#We can see that K=1 does a perfect job of classifying the points. This should be expected as both the test and training are done on the test set, and with a knn of 1, it should always be 100
+
+#For K=10, we still see 0 training error, showing that in 4 dimensions, the data separates well. We don't see a miss-classification until K=20
+
+#KNN for the training set at least, performs better than log reg, LDA and QDA
+
+#We can see that LDA and QDA both perform the best on sensitivity and the worst on specificity and overall accuracy
+
+#Training errors
+kable(data.frame(lda.train.error, qda.train.error, logit.train.error,knn.train.error))
+
+#Specificities
+kable(data.frame(lda.specificity, qda.specificity, logit.specificity,knn.specificity))
+
+#Sensitivities
+kable(data.frame(lda.sensitivity, qda.sensitivity, logit.sensitivity,knn.sensitivity))
+
+```
+
+
+# Problem 4 (30 points): compare test errors of logistic regression, LDA, QDA and KNN
+
+
+```{r Problem_4 }
+
+#10 fold cross validation of logit
+
+#Metrics to return 
+sens <- numeric(10)
+spec <- numeric(10)
+te <- numeric(10)
+
+#Random shuffle of data
+set.seed(1)
+dat <- dbaDat
+shuffle <- dat[sample(nrow(dbaDat)),]
+#create 10 partitions of data
+folds <- cut(seq(1,nrow(shuffle)),breaks=10,labels=FALSE)
+for(i in 1:10){
+  #for each partition, set the training and test records
+  testIndexes <- which(folds==i,arr.ind=TRUE)
+  testData <- shuffle[testIndexes, ]
+  trainData <- shuffle[-testIndexes, ]
+  
+  #fit our model
+  logit.fit <- glm(auth ~.,data=trainData,family=binomial) 
+
+  logit.prob <- predict(logit.fit,newdata=testData,type="response")
+  pred <- factor((logit.prob > .5)*1)
+  
+  #return metrics of interest
+  sens[i] <- sensit(pred, testData$auth)
+  spec[i]<- specif(pred, testData$auth)
+  te[i]<-trainError(pred, testData$auth)
+}
+
+logit.parms <- list(se=sens, sp=spec, te=te)
+
+
+#Repeating above for all remaining models
+#LDA 
+
+sens <- numeric(10)
+spec <- numeric(10)
+te <- numeric(10)
+set.seed(1)
+for(i in 1:10){
+  testIndexes <- which(folds==i,arr.ind=TRUE)
+  testData <- shuffle[testIndexes, ]
+  trainData <- shuffle[-testIndexes, ]
+  lda.fit <- lda(auth ~ .,data=trainData)
+  pred <- predict(lda.fit, newdata = testData)$class
+  sens[i] <- sensit(pred, testData$auth)
+  spec[i]<- specif(pred, testData$auth)
+  te[i]<-trainError(pred, testData$auth)
+}
+
+lda.parms <- list(se=sens, sp=spec, te=te)
+
+#QDA
+sens <- numeric(10)
+spec <- numeric(10)
+te <- numeric(10)
+set.seed(1)
+for(i in 1:10){
+  testIndexes <- which(folds==i,arr.ind=TRUE)
+  testData <- shuffle[testIndexes, ]
+  trainData <- shuffle[-testIndexes, ]
+  qda.fit <- qda(auth ~ .,data=trainData)
+  pred <- predict(qda.fit, newdata = testData)$class
+  sens[i] <- sensit(pred, testData$auth)
+  spec[i]<- specif(pred, testData$auth)
+  te[i]<-trainError(pred, testData$auth)
+}
+
+qda.parms <- list(se=sens, sp=spec, te=te)
+
+#knn=1
+sens <- numeric(10)
+spec <- numeric(10)
+te <- numeric(10)
+set.seed(1)
+for(i in 1:10){
+  testIndexes <- which(folds==i,arr.ind=TRUE)
+  testData <- shuffle[testIndexes, ]
+  trainData <- shuffle[-testIndexes, ]
+  pred <- knn(trainData, testData, trainData$auth, k=1)
+  sens[i] <- sensit(pred, testData$auth)
+  spec[i]<- specif(pred, testData$auth)
+  te[i]<-trainError(pred, testData$auth)
+}
+
+knn1.parms <- list(se=sens, sp=spec, te=te)
+
+
+#knn=2
+sens <- numeric(10)
+spec <- numeric(10)
+te <- numeric(10)
+set.seed(1)
+for(i in 1:10){
+  testIndexes <- which(folds==i,arr.ind=TRUE)
+  testData <- shuffle[testIndexes, ]
+  trainData <- shuffle[-testIndexes, ]
+  pred <- knn(trainData, testData, trainData$auth, k=2)
+  sens[i] <- sensit(pred, testData$auth)
+  spec[i]<- specif(pred, testData$auth)
+  te[i]<-trainError(pred, testData$auth)
+}
+
+knn2.parms <- list(se=sens, sp=spec, te=te)
+
+
+#knn=5
+sens <- numeric(10)
+spec <- numeric(10)
+te <- numeric(10)
+set.seed(1)
+for(i in 1:10){
+  testIndexes <- which(folds==i,arr.ind=TRUE)
+  testData <- shuffle[testIndexes, ]
+  trainData <- shuffle[-testIndexes, ]
+  pred <- knn(trainData, testData, trainData$auth, k=5)
+  sens[i] <- sensit(pred, testData$auth)
+  spec[i]<- specif(pred, testData$auth)
+  te[i]<-trainError(pred, testData$auth)
+}
+
+knn5.parms <- list(se=sens, sp=spec, te=te)
+
+#knn=10
+sens <- numeric(10)
+spec <- numeric(10)
+te <- numeric(10)
+set.seed(1)
+for(i in 1:10){
+  testIndexes <- which(folds==i,arr.ind=TRUE)
+  testData <- shuffle[testIndexes, ]
+  trainData <- shuffle[-testIndexes, ]
+  pred <- knn(trainData, testData, trainData$auth, k=10)
+  sens[i] <- sensit(pred, testData$auth)
+  spec[i]<- specif(pred, testData$auth)
+  te[i]<-trainError(pred, testData$auth)
+}
+
+knn10.parms <- list(se=sens, sp=spec, te=te)
+
+
+#knn=20
+sens <- numeric(10)
+spec <- numeric(10)
+te <- numeric(10)
+set.seed(1)
+for(i in 1:10){
+  testIndexes <- which(folds==i,arr.ind=TRUE)
+  testData <- shuffle[testIndexes, ]
+  trainData <- shuffle[-testIndexes, ]
+  pred <- knn(trainData, testData, trainData$auth, k=20)
+  sens[i] <- sensit(pred, testData$auth)
+  spec[i]<- specif(pred, testData$auth)
+  te[i]<-trainError(pred, testData$auth)
+}
+
+knn20.parms <- list(se=sens, sp=spec, te=te)
+
+#knn=50
+sens <- numeric(10)
+spec <- numeric(10)
+te <- numeric(10)
+set.seed(1)
+for(i in 1:10){
+  testIndexes <- which(folds==i,arr.ind=TRUE)
+  testData <- shuffle[testIndexes, ]
+  trainData <- shuffle[-testIndexes, ]
+  pred <- knn(trainData, testData, trainData$auth, k=50)
+  sens[i] <- sensit(pred, testData$auth)
+  spec[i]<- specif(pred, testData$auth)
+  te[i]<-trainError(pred, testData$auth)
+}
+
+knn50.parms <- list(se=sens, sp=spec, te=te)
+
+
+#knn=100
+sens <- numeric(10)
+spec <- numeric(10)
+te <- numeric(10)
+set.seed(1)
+for(i in 1:10){
+  testIndexes <- which(folds==i,arr.ind=TRUE)
+  testData <- shuffle[testIndexes, ]
+  trainData <- shuffle[-testIndexes, ]
+  pred <- knn(trainData, testData, trainData$auth, k=100)
+  sens[i] <- sensit(pred, testData$auth)
+  spec[i]<- specif(pred, testData$auth)
+  te[i]<-trainError(pred, testData$auth)
+}
+
+knn100.parms <- list(se=sens, sp=spec, te=te)
+
+boxplot(logit.parms$te,
+          lda.parms$te,
+          qda.parms$te,
+          knn1.parms$te,
+          knn2.parms$te,
+          knn5.parms$te,
+          knn10.parms$te,
+          knn20.parms$te,
+          knn50.parms$te,
+          knn100.parms$te,
+          names=c("log","lda","qda","knn1","knn2","knn5",
+                  "knn10","knn20","knn50","knn100"),
+          col = rainbow(10),
+          ylab="percent",
+          main = "Test Error")
+
+boxplot(logit.parms$se,
+          lda.parms$se,
+          qda.parms$se,
+          knn1.parms$se,
+          knn2.parms$se,
+          knn5.parms$se,
+          knn10.parms$se,
+          knn20.parms$se,
+          knn50.parms$se,
+          knn100.parms$se,
+          names=c("log","lda","qda","knn1","knn2","knn5",
+                  "knn10","knn20","knn50","knn100"),
+          col = rainbow(10),
+          ylab="percent",
+          main = "Sensitivity")
+
+boxplot(logit.parms$sp,
+          lda.parms$sp,
+          qda.parms$sp,
+          knn1.parms$sp,
+          knn2.parms$sp,
+          knn5.parms$sp,
+          knn10.parms$sp,
+          knn20.parms$sp,
+          knn50.parms$sp,
+          knn100.parms$sp,
+          names=c("log","lda","qda","knn1","knn2","knn5",
+                  "knn10","knn20","knn50","knn100"),
+          col = rainbow(10),
+          ylab="percent",
+          main = "Specificity") 
+
+# Test error was smallest for KNN values 2, 5, 10 which predicted the tests perfectly
+# KNN values of 20 and 50 performed second best
+# log regression was 3rd
+# All test errors were under 5%  with the mean test errors not exceeding 2.5% for any of the methods
+# QDA performed poorly compared to when we only looked at training error
+
+#Specificity was very much in line with the Test error rates. Logi regression again performed well, however one outlier was observed. Both KNN of 5 and QDA had large variances
+
+#In terms of sensitivity, only the log regression model and the KNN at 50 had values other than 100%. For both of these, the variance was comparatively high.
+
+#Overall, KNN does a fantastic job for low values of K. This seems to show that the data set is highly differentiable in 4-5 dimensions. That it did so well may indicate the data is not quite linear or quadratic
+
+```
+
+Using resampling approach of your choice (e.g. cross-validation, bootstrap, etc.) obtain test error as well as sensitivity and specificity for each of these methods (logistic regression, LDA, QDA, KNN with $k=1,2,5,10,20,50,100$).  Present results in the form of boxplots, compare test error/sensitivity/specificity across these methods and discuss their relative performance.
+
+# Extra 10 points problem: naive Bayes classifier
+
+```{r}
+library(e1071)
+ 
+sens <- numeric(10)
+spec <- numeric(10)
+te <- numeric(10)
+set.seed(1)
+for(i in 1:10){
+  testIndexes <- which(folds==i,arr.ind=TRUE)
+  testData <- shuffle[testIndexes, ]
+  trainData <- shuffle[-testIndexes, ]
+  nb.fit<-naiveBayes(auth ~., data=trainData)
+  nb.fit
+  pred <- predict(nb.fit, newdata=testData)
+  sens[i] <- sensit(pred, testData$auth)
+  spec[i]<- specif(pred, testData$auth)
+  te[i]<-trainError(pred, testData$auth)
+}
+nb.parms <- list(se=sens, sp=spec, te=te)
+
+
+
+boxplot(logit.parms$te,
+          lda.parms$te,
+          qda.parms$te,
+          knn1.parms$te,
+          knn2.parms$te,
+          knn5.parms$te,
+          knn10.parms$te,
+          knn20.parms$te,
+          knn50.parms$te,
+          knn100.parms$te,
+          nb.parms$te,
+          names=c("log","lda","qda","knn1","knn2","knn5",
+                  "knn10","knn20","knn50","knn100","NB"),
+          col = rainbow(10),
+          ylab="percent",
+          main = "Test Error")
+
+boxplot(logit.parms$se,
+          lda.parms$se,
+          qda.parms$se,
+          knn1.parms$se,
+          knn2.parms$se,
+          knn5.parms$se,
+          knn10.parms$se,
+          knn20.parms$se,
+          knn50.parms$se,
+          knn100.parms$se,
+          nb.parms$se,
+          names=c("log","lda","qda","knn1","knn2","knn5",
+                  "knn10","knn20","knn50","knn100","NB"),
+          col = rainbow(10),
+          ylab="percent",
+          main = "Sensitivity")
+
+boxplot(logit.parms$sp,
+          lda.parms$sp,
+          qda.parms$sp,
+          knn1.parms$sp,
+          knn2.parms$sp,
+          knn5.parms$sp,
+          knn10.parms$sp,
+          knn20.parms$sp,
+          knn50.parms$sp,
+          knn100.parms$sp,
+          nb.parms$sp,
+          names=c("log","lda","qda","knn1","knn2","knn5",
+                  "knn10","knn20","knn50","knn100","NB"),
+          col = rainbow(10),
+          ylab="percent",
+          main = "Specificity") 
+
+#Naiive Bayes performs considerably worse in our example,
+#This could be due to correlation in our dataset, we can see that this is the case the curt and skew are strongly correlated.
+
+#We also get larger variances that with the other methodss
+
+
+cor(dbaDat[,-5])
+```
+
+
+Fit naive Bayes classifier (see lecture slides for examples of using `naiveBayes` function from package `e1071`) on banknote authentication dataset and assess its performance on test data by resampling along with logistic regression, LDA, QDA and KNN in Problem 4 above.  In other words, add naive Bayes to the rest of the methods evaluated above. 

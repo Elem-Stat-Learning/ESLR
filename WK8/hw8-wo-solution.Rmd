@@ -1,0 +1,347 @@
+---
+title: "CSCI E-63C Week 8 Assignment"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(cluster)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Preface
+
+In this assignment we will exercise some of the measures for evaluating "goodness of clustering" presented in the lecture this week on the clusters obtained for the World Health Statistics (WHS) dataset from week 6.  Please feel free to adapt/reuse code presented in lecture slides as necessary or implementations already available in R.  All problems in this assignment are expected to be performed on *scaled* WHS data -- if somewhere it does not mention it explicitly, please assume that it is scaled data that should be used. 
+
+Lastly, as a dose of reality check: WHS is a dataset capturing variability of population health measures across more or less the entire diversity of societies in the world -- please be prepared to face the fact that resulting clustering structures are far from textbook perfect, may not be very clearly defined, etc.
+
+## Note on quakes data (and *3 extra points per problem*) 
+
+As you will notice, WHS dataset does not have the most striking cluster structure to it - at least as far as formal measurements of cluster strength that we are working with in this assignment are concerned (or the notion that there is well defined "optimal" number of clusters when split of observations into larger or smaller groups results in "worse" metrics). Not an uncommon situation for the data we have to work with at all.
+
+As an opportunity to see the output of the code that you are using/developing for this assignment when applied to a dataset with more distinct substructure (and earn extra points by doing that)  for each of the five problems there are in this assignment (four required, one for extra points) once you generated required plots for WHS dataset, adding the same kinds of plots but for a standard R dataset "quakes" will be earning *3 extra points* for each problem.  So that if everything works perfectly this could add 15 extra points to the total to this assignment (5 problems including an extra point problem times 3 extra points each) so that along with the extra 5 points problem below, this assignment has potential of adding up to 20 extra points to your homework total.
+
+Dataset "quakes" is routinely available in R upon log in - to "see" it, the following should just work without any further steps for a standard R installation:
+
+```{r}
+clr <- gray((quakes$depth-min(quakes$depth))/range(quakes$depth)%*%c(-1,1))
+plot(quakes$lat,quakes$long,col=clr)
+```
+ 
+or, similarly, if you are a ggplot fan (in which case you will know to load ggplot2 library first):
+
+```{r}
+ggplot(quakes,aes(x=lat,y=long,colour=depth))+geom_point()
+```
+ 
+If you write your code with reusability in mind, applying it to "quakes" should be just a straightforward drop in replacement of WHS data frame with that of "quakes".  You will see that the subclasses of observations are so well defined in "quakes" that is almost boring in its own way.  Nothing is perfect in this world, but you should see more interesting behavior of CH index in this case, for example.
+
+
+# Problem 1: within/between cluster variation and CH-index (15 points)
+
+Present plots of (total) within and between cluster variance provided by K-means clustering on scaled WHS data for 2 through 20 clusters.  Choose large enough value of `nstart` for better stability of the results across multiple trials and evaluate stability of those results across several runs.  Discuss the results and whether the shape of the curves suggest specific number of clusters in the data.
+
+```{r problem_1}
+
+#Read tab separated whs data
+whs <- read.table("whs2016_AnnexB-data-wo-NAs.txt", sep = "\t", quote=NULL)
+
+head(whs)
+
+#Explictely scale data
+s.whs <- scale(whs)
+
+
+xClust <- function(dat, n=20, ns=25){
+  set.seed(1234)
+  ch <- numeric(n-1)
+  within <- numeric(n-1)
+  between <- numeric(n-1)
+  for (c in 2:n) {
+    km <- kmeans(dat, c, nstart = ns)
+    within[c-1] <- km$tot.withinss
+    between[c-1] <- km$betweenss
+    
+    #CH Index
+    ch[c-1] <- (km$betweenss/(c-1))/(km$tot.withinss/(length(km$cluster)-c))
+  }
+  list(w=within, b=between, ch=ch)
+}
+
+
+xc <- xClust(s.whs)
+
+plot (2:20,xc$w, ylab="SS [within]", type="b", pch=19, xlab = "N Clusters")
+
+plot (2:20,xc$b, ylab="SS [tot.between]", type="b", pch=19, xlab = "N Clusters")
+
+plot (2:20,xc$ch, ylab="CH Index", type="b", pch=19, xlab = "N Clusters",ylim=c(0,90))
+
+
+# From the plots above, we can see that no obvious "elbow" emerges if we just look at the within and total sum-of squares. Increasing the number of clusters increases the total between sum of squares and minimizes the withs sum of squares. This suggest a lack of stable clusters. CH-index also shows no discernable good candidate of cluster numbers.
+for ( i in 1:10 ) { 
+  chrnd = numeric() 
+  for ( k in 2:20 ) {
+    krnd = kmeans(apply(s.whs,2,function(x)runif(length(x),min(x),max(x))),k)
+    chrnd[k-1] = (krnd$betweenss/(k-1))/ (krnd$tot.withinss/(length(krnd$cluster)-k))
+  }
+  points(chrnd,type="l",col="red") 
+}
+
+
+#Plotting alongside samples from a uniform distribution, we can see that the CH-Index is at its maximum at 2 clusters,  after 3 clusters, the trend of the uniform and the CH-Index is similar. However our data is not random.
+
+# Quakes data
+
+s.quakes <- scale(quakes)
+
+head(s.quakes)
+qc <- xClust(s.quakes)
+
+plot (2:20,qc$w, ylab="SS [within]", type="b", pch=19, xlab = "N Clusters")
+
+plot (2:20,qc$b, ylab="SS [tot.between]", type="b", pch=19, xlab = "N Clusters")
+
+plot (2:20,qc$ch, ylab="CH Index", type="b", pch=19, xlab = "N Clusters")
+
+#With the quakes dataset, we have much clearer clustering than what was observed in the WHS dataset
+# Both the total between  and within sum of squares seems to indicate that 4 clusters is the optimal number of clusters. This belief is reinforced with the CH- Index data
+
+
+```
+
+# Problem 2: gap statistics (15 points)
+
+Using code provided in the lecture slides for calculating gap statistics or one of its implementations available in R (e.g. `clusGap` from library `cluster`) compute and plot gap statistics for K-means clustering of scaled WHS data for 2 through 20 clusters.  Discuss whether it indicates presence of clearly defined cluster structure in this data.
+```{r}
+
+
+lw.unif <- function(m,K,N=20) {
+  w <- numeric(N-1)
+  for ( i in 2:N ) {
+    m.new <- apply(m,2,function(x) { 
+      runif(length(x),min=min(x),max=max(x))
+     })
+    kf <- kmeans(m.new,K, iter.max = 20)
+    w[i-1] <- kf$tot.withinss
+  }
+  return(list(LW=mean(log(w)),SE=sd(log(w))/sqrt(N))) 
+}
+
+
+gapStat <- function(dat, ns=25){
+  set.seed(1234)
+  gap <- numeric(19)
+  se <- numeric(19)
+  lw <- numeric(19)
+  lt <- numeric(19)
+  for ( k in 2:20 ) {
+    kf <- kmeans(dat,k, nstart = ns)
+    #Null model
+    sim <- lw.unif(dat,k)
+    lw[k-1] <- sim$LW
+    gap[k-1] <- sim$LW - log(kf$tot.withinss) 
+    se[k-1] <- sim$SE
+    lt[k-1] <- log(kf$tot.withinss)
+  }   
+  return(list(sLW=lw, sSE=se, kGap=gap, kLT = lt))
+}
+
+
+# find optimal K: 
+optK <- function (x)min(which(x$kGap[-length(x$kGap)]>=(x$kGap-x$sSE)[-1] ) )
+
+
+
+g1 <- gapStat(s.whs)
+
+plot(2:20,g1$kGap,pch=19,type="b" ,ylab="gap", xlab="N Clusters")
+#Again, visually no real discernable peak. Although it looks like the first (small) peak is reached at cluster size of 8
+
+optK(g1)
+# Throws warning due to no points meeting criteria. Seems to suggest that there is no clearly defined clusters
+
+
+plot(2:20,g1$sLW,type="l",lwd=1,col="red",xlab="K" ,ylab="log(withinss)", ylim=c(7.5,11))
+arrows(2:20, g1$sLW-g1$sSE, 2:20, g1$sLW+g1$sSE, length=0.05, angle=90, code=3, col=2) 
+points(2:20,g1$kLT,type="b",pch=19,lwd=2)
+legend("topright",c("ori","unif"),text.col=1:2,col=1:2,pch=c(19,3),lwd=c(1,2),ncol=2)
+
+#Following from the lectures, plotting the Log (within sum of quares) for both the uniform and observed data
+#Gap statistic should maximize when the difference between the original and null are maximized. Here it seems to increase with the increase in cluster numbers
+
+
+##Quakes data
+q1 <- gapStat(s.quakes)
+plot(2:20,q1$kGap,pch=19,type="b", ylab="gap",xlab="N Clusters")
+
+#Here we can see that the first peak is reached at cluster 5
+optK(q1)
+
+#The optimal cluster is calculated as 4, which is in line with what was observed for problem 1
+
+```
+
+
+# Problem 3: stability of hierarchical clustering (15 points)
+
+For top 2, 3 and 4 clusters (as obtained by `cutree` at corresponding levels of `k`) found by Ward method in `hclust` and by K-means when applied to the scaled WHS data compare cluster memberships between these two methods and describe their concordance.  This problem is similar to the one in 6th week assignment, but this time it is *required* to: 1) use two dimensional contingency tables implemented by `table` to compare membership between two assignments of observations to clusters, and 2) programmatically re-order rows and columns in the `table` outcome in the increasing order of observations shared between two clusters (please see examples in lecture slides).
+```{r}
+
+
+
+matrix.sort <- function(m) {
+  require(clue)
+  p = solve_LSAP(m, maximum=T) # find the permutation...
+  m[, p] # and apply it!
+}
+
+
+cmp.shortcut = function(dat,K) {
+   h <- hclust(dist(dat), method = "ward.D")
+   matrix.sort(table(
+      hc <- cutree(h,K),
+      km <- kmeans(dat, K, nstart=50)$cluster
+      ))
+}
+
+library(clue)
+
+
+cmp.shortcut(s.whs, 2)
+#At 2 clusters, the groupings seems to perform rather well, it seems fairly stable across methods
+
+cmp.shortcut(s.whs, 3)
+
+#At 3 clusters, we can see that one cluster has differentiated well, however the other 2 clusters have more uncertainty that the 2 cluster groupings
+cmp.shortcut(s.whs, 4)
+
+#At 4 clusters, the table is noisy and there is little pattern to the clustering. There is little agreement between the methods
+
+
+##Quakes data
+
+cmp.shortcut(s.quakes, 2)
+# Almost no pattern observed at 2 clusters
+cmp.shortcut(s.quakes, 3)
+#Still quite a bit of disagreement
+
+cmp.shortcut(s.quakes, 4)
+#Much better, still a bit of noise for most clusters. It seems that the two methods assign clusters quite differently
+
+
+```
+
+
+## For *extra* 5 points: between/within variance in hierarchical clusters
+
+Using functions `between` and `within` provided in the lecture slides calculate between and (total) within cluster variances for top 2 through 20 clusters defined by Ward's hierarchical clustering when applied to scaled WHS data.  Plot the results.  Compare their behavior to that of the same statistics when obtained for K-means clustering above.
+```{r}
+
+within=function(d,clust) { 
+  w=numeric(length(unique(clust))) 
+  for ( i in sort(unique(clust)) ) {
+    members = d[clust==i,,drop=F]
+    centroid = apply(members,2,mean) 
+    members.diff = sweep(members,2,centroid) 
+    w[i] = sum(members.diff^2)
+  }
+  return(w) 
+}
+
+between=function(d,clust) {
+  b=0
+  total.mean = apply(d,2,mean)
+  for ( i in sort(unique(clust))) {
+    members = d[clust==i,,drop=F] 
+      centroid = apply(members,2,mean) 
+      b = b + nrow(members)*sum( (centroid-total.mean)^2 )
+  }
+return(b) 
+}
+
+
+
+data.1=s.whs
+dd.1=dist(data.1)
+hw.1=hclust(dd.1,method="ward.D2") 
+w.tot=numeric(19)
+btw=numeric(19)
+for ( k in 2:20 ) {
+  clust = cutree(hw.1,k=k)
+  w = within(data.1,clust) 
+  w.tot[k-1]=sum(w)
+  btw[k-1] = between(data.1,clust)
+}
+
+plot(2:20, btw, type="b", ylim=c(2000,7000) ,xlab="Clusters", ylab="Tot Between SS")
+
+points(2:20, xc$b, col="red", pch=19,type="b")
+legend("topright",c("kmeans","hclust"),text.col=1:2,col=1:2,pch=c(1,19),lwd=c(1,2),ncol=2)
+
+#As can be seen from the plot, the two methods perform somewhat similary with Hclust producing slightly higher Between SS, especially when the number of clusters are low.
+
+
+#Quake data
+data.1=s.quakes
+dd.1=dist(data.1)
+hw.1=hclust(dd.1,method="ward.D2") 
+w.tot=numeric(19)
+btw=numeric(19)
+for ( k in 2:20 ) {
+  clust = cutree(hw.1,k=k)
+  w = within(data.1,clust) 
+  w.tot[k-1]=sum(w)
+  btw[k-1] = between(data.1,clust)
+}
+
+plot(2:20, btw, type="b", ylim=c(1000,7000) ,xlab="Clusters", ylab="Tot Between SS")
+
+points(2:20, xc$b, col="red", pch=19,type="b")
+legend("topright",c("kmeans","hclust"),text.col=1:2,col=1:2,pch=c(1,19),lwd=c(1,2),ncol=2)
+
+#Again, Hclust seems to be doing a better job for maximising between sum of squares. However, at around the optimal number of clusters (4-5), both methods perform much more similarly. As the number of clusters increase, hclust seems to outperform kmeans in this metric.
+
+```
+
+
+# Problem 4: Brute force randomization in hierarchical clustering (15 points)
+
+Compare distribution of the heights of the clusters defined by `hclust` with Ward's clustering of Euclidean distance between countries in scaled WHS dataset and those obtained by applying the same approach to the distances calculated on randomly permuted WHS dataset as illustrated in the lecture slides.  Discuss whether results of such brute force randomization are supportive of presence of unusually close or distant sets of observations within WHS data.
+
+```{r}
+
+
+dat.1 <- s.whs
+
+ori.heights = hw.1$height 
+rnd.heights = numeric() 
+for ( i.sim in 1:100 ) {
+   data.rnd <-apply(data.1,2,sample) 
+   hw.rnd=hclust(dist(data.rnd),method="ward.D2") 
+   rnd.heights <- c(rnd.heights,hw.rnd$height)
+} 
+plot(ori.heights,rank(ori.heights)/length(ori.heights),
+   col="red",xlab="height",ylab="F(height)",pch=19)
+points(rnd.heights,rank(rnd.heights)/length(rnd.heights),
+   col="blue")
+
+
+
+
+
+dat.1 <- s.quakes
+
+ori.heights = hw.1$height 
+rnd.heights = numeric() 
+for ( i.sim in 1:100 ) {
+   data.rnd <-apply(data.1,2,sample) 
+   hw.rnd=hclust(dist(data.rnd),method="ward.D2") 
+   rnd.heights <- c(rnd.heights,hw.rnd$height)
+} 
+plot(ori.heights,rank(ori.heights)/length(ori.heights),
+   col="red",xlab="height",ylab="F(height)",pch=19)
+points(rnd.heights,rank(rnd.heights)/length(rnd.heights),
+   col="blue")
+```
+

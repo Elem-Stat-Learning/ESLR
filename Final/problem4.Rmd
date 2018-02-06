@@ -1,0 +1,90 @@
+---
+title: "problem4"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(knitr)
+library(dplyr)
+library(reshape2)
+library(ggplot2)
+library(countrycode)
+library(randomForest)
+library(stringr)
+library(e1071)
+#function to create metrics of interest
+assess=function(truth,predicted) {
+  truth = truth[!is.na(truth)]
+  truth = truth[!is.na(predicted)]
+  predicted = predicted[!is.na(predicted)] 
+  TP = sum(truth==1 & predicted==1) 
+  TN = sum(truth==0 & predicted==0) 
+  FP = sum(truth==0 & predicted==1) 
+  FN = sum(truth==1 & predicted==0) 
+  P = TP+FN # total positives
+  N = FP+TN  # total negatives
+  list(
+   accuracy = signif(100*(TP+TN)/(P+N),3),
+   error =  signif(100*(FP+FN)/(P+N),3),
+   sensitivity=signif(100*TP/P,3),
+   specificity=signif(100*TN/N,3)
+  )
+}
+
+train <- read.table("train.csv")
+perf <- read.table("perf.csv")
+```
+
+# Problem 4: SVM (25 points)
+
+Develop SVM model of this data choosing parameters (e.g. choice of kernel, cost, etc.) that appear to yield better performance.  Test model performance on multiple splits of data into training and test subsets, summarize model performance in terms of accuracy/error, sensitivity/specificity and compare to the performance of other methods reported in the dataset description.
+```{r}
+
+#Using a sample of the dataset for parameter tuning as it takes too long. Its an old laptop :( 
+set.seed(34343)
+ttrain <- train[sample(nrow(train), 3000), ]
+
+
+#First trying with a linear kernel and diffent costs
+summary(tune(svm,class~.,data=ttrain,kernel="linear",ranges=list(cost=c(0.1,1,2,5,10,20,50))))
+
+#Trying the radial kernel with different values for cost and gamma parameters
+tune(svm,class~.,data=ttrain,kernel="radial",ranges=list(cost=c(.5,1,2,5,10),gamma=c(0.05,0.1,1.5)))
+  
+
+#We get about an error reduction of about 1 percent with the radial kernel (cost=1, gamma=.1) vs the linear kernel
+
+#Running bootstrap with our best observed model
+set.seed(345)
+svTmp <-NULL
+for ( iSim in 1:30) {
+    bTrain <- sample(c(FALSE,TRUE,TRUE),nrow(train),replace=TRUE)
+    svTrain <- svm(class~.,data=train[bTrain,],kernel="radial",cost=1,gamma=.1)
+    svTestPred <- predict(svTrain, newdata=train[!bTrain,]) 
+    tmpVals <- assess(train[!bTrain,]$class==">50K",svTestPred==">50K")
+    svTmp <- rbind(svTmp,data.frame(iSim,tmpVals))
+}
+
+melt(svTmp,id.vars="iSim") %>% ggplot(aes(x=variable,y=value,colour=variable)) + geom_boxplot() + ggtitle("SVM")
+
+#again there is no stand out difference between the accuracy, error, sensitivity or specitivity of SVM vs the other methods seen. 
+
+
+perf <- rbind(perf, data.frame(algo="SVM",err=mean(svTmp$error)))
+kable(perf)
+ggplot(perf,aes(x=algo,y=err)) + geom_point() + theme(axis.text.x = element_text(angle = 90, hjust = 1)) +labs(x="Algorithm",y="Error")
+
+#The SVM radial kernel, although performing better than the linear kernal, is only slightly better than logistic regression, and over 1% worse than Random Forest (in terms of error).
+
+```
+
+
+```{r include=FALSE}
+#Writing out for use of other problems
+write.table(svTmp,file="svTmp.csv")
+write.table(perf,file="perf.csv")
+```
+
+

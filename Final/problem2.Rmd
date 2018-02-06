@@ -1,0 +1,107 @@
+---
+title: "problem2"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+library(dplyr)
+library(reshape2)
+library(ggplot2)
+library(countrycode)
+library(randomForest)
+library(stringr)
+library(e1071)
+```
+
+
+# Problem 2: logistic regression (25 points)
+
+Develop logistic regression model of the outcome as a function of multiple predictors in the model.  Which variables are significantly associated with the outcome?  Test model performance on multiple splits of data into training and test subsets, summarize it in terms of accuracy/error, sensitivity/specificity and compare to the performance of other methods reported in the dataset description.
+
+
+```{r include=FALSE}
+
+train <-read.table("train.csv")
+```
+
+```{r}
+
+#Fit first logistic regression model
+glmRes <- glm(class~.,data =train,family=binomial)
+
+#Showing variables of significance
+summary(glmRes)
+
+#All variables are highly significant with the exception of race, however it is still significant
+
+#confusion matrix
+glmPred <- predict(glmRes,type="response")>0.5
+tblTemp <- table((train[,"class"])==">50K",(glmPred))
+
+#Error rate
+1-sum(diag(tblTemp))/nrow(train)
+
+
+#function to create metrics of interest
+assess=function(truth,predicted) {
+  truth = truth[!is.na(truth)]
+  truth = truth[!is.na(predicted)]
+  predicted = predicted[!is.na(predicted)] 
+  TP = sum(truth==1 & predicted==1) 
+  TN = sum(truth==0 & predicted==0) 
+  FP = sum(truth==0 & predicted==1) 
+  FN = sum(truth==1 & predicted==0) 
+  P = TP+FN # total positives
+  N = FP+TN  # total negatives
+  list(
+   accuracy = signif(100*(TP+TN)/(P+N),3),
+   error =  signif(100*(FP+FN)/(P+N),3),
+   sensitivity=signif(100*TP/P,3),
+   specificity=signif(100*TN/N,3)
+  )
+}
+
+
+
+set.seed(345)
+lrTmp <-NULL
+for ( iSim in 1:30 ) {
+    #Hold out a 3rd for testing
+    bTrain <- sample(c(FALSE,TRUE,TRUE),nrow(train),replace=TRUE)
+    glmTrain <- glm(class~.,data=train[bTrain,],family=binomial)
+    glmTestPred <- predict(glmTrain, newdata=train[!bTrain,], type="response") > 0.5
+    tmpVals <- assess(train[!bTrain,"class"]==">50K",glmTestPred)
+    lrTmp <- rbind(lrTmp,data.frame(iSim,tmpVals))
+}
+
+
+mean(lrTmp$accuracy)
+#Mean accuracy of around 85%
+
+melt(lrTmp,id.vars="iSim") %>% ggplot(aes(x=variable,y=value,colour=variable)) + geom_boxplot() + ggtitle("Logistic Regression")
+
+#Very low variance on the estimates, with higher specificity than sensitivity, ie it does a better job of predicting those with class <50 than >50. This isnt a big suprise as we have about 3 times as many people in the lower class
+
+
+err <-c(15.54, 14.46,14.94,15.64,16.47,16.84,19.54,
+        14.10,16.00,14.82,14.05,14.46,16.12,21.42,20.35,15.04)
+
+algo <-c("C4.5","C4.5-auto","C4.5 rules","Voted ID3 (0.6)","Voted ID3 (0.8)","T2","1R","NBTree","CN2","HOODG","FSS Naive Bayes","IDTM (Decision table)","Naive-Bayes","Nearest-neighbor (1)","Nearest-neighbor (3)","OC1")
+
+perf <- data.frame(algo,err)
+
+perf <- rbind(perf, data.frame(algo="Logistic Regression",err=mean(lrTmp$error)))
+kable(perf)
+
+ggplot(perf,aes(x=algo,y=err)) + geom_point() + theme(axis.text.x = element_text(angle = 90, hjust = 1)) +labs(x="Algorithm",y="Error")
+
+```
+
+```{r include=FALSE}
+
+#Writing out for use of other problems
+write.table(lrTmp,file="lrTmp.csv")
+write.table(perf,file="perf.csv")
+```

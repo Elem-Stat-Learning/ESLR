@@ -1,0 +1,508 @@
+---
+title: 'CSCI E-63C Week 6 Assignment'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(cluster)
+library(ISLR)
+library(MASS)
+library(ggplot2)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Preface
+
+In this assignment we will exercise some of the unsupervised learning approaches on [2016 Global Health Observatory data](http://www.who.int/gho/publications/world_health_statistics/2016/en/).  It is available at that website in the form of [Excel file](http://www.who.int/entity/gho/publications/world_health_statistics/2016/whs2016_AnnexB.xls?ua=1), but its cleaned up version ready for import into R for further analyses is available at CSCI E-63C canvas course web site [whs2016_AnnexB-data-wo-NAs.txt](https://canvas.harvard.edu/files/3707370/download?download_frd=1).  The cleaning and reformatting included: merging data from the two parts of Annex B, reducing column headers to one line with short tags, removal of ">", "<" and whitespaces, conversion to numeric format and replacement of undefined values (as indicated by en-dash'es in the Excel) with corresponding averages of those attributes.  The code that was used to format merged data is shown at the end of this document for your reference only.  You are advised to save yourself that trouble and start from preformatted text file available at the course website as shown above.  The explicit mapping of short variable names to their full description as provided in the original file is available in Excel file [whs2016_AnnexB-reformatted.xls](https://canvas.harvard.edu/files/3707368/download?download_frd=1) also available on the course canvas page.  Lastly, you are advised to download a local copy of this text file to your computer and access it there (as opposed to relying on R ability to establish URL connection to canvas that potentially requires login etc.)
+
+Short example of code shown below illustrates reading this data from a local copy on your computer (assuming it has been copied into current working directory of your R session -- `getwd()` and `setwd()` commands are helpful to find out what is it currently and change it to desired location) and displaying summaries and pairs plot of five (out of almost 40) arbitrary chosen variables.  This is done for illustration purposes only -- the problems in the assignment expect use of all variables in this dataset.
+
+```{r WHS}
+whsAnnBdatNum <- read.table("whs2016_AnnexB-data-wo-NAs.txt",sep="\t",header=TRUE,quote="")
+summary(whsAnnBdatNum[,c(1,4,7,10,17)])
+pairs(whsAnnBdatNum[,c(1,4,7,10,17)])
+```
+
+In some way this dataset is somewhat similar to the `USArrests` dataset extensively used in ISLR labs and exercises -- it collects various continuous statistics characterizing human population across different territories.  It is several folds larger though -- instead of `r nrow(USArrests)` US states and `r ncol(USArrests)` attributes in `USArrests`, world health statistics (WHS) data characterizes `r nrow(whsAnnBdatNum)` WHO member states by `r ncol(whsAnnBdatNum)` variables.  Have fun!
+
+The following problems are largely modeled after labs and exercises from Chapter 10 ISLR.  If anything presents a challenge, besides asking questions on piazza (that is always a good idea!), you are also encouraged to review corresponding lab sections in ISLR Chapter 10.
+
+# Problem 1: Principal components analysis (PCA) (25 points)
+
+## Sub-problem 1a: means and variances of WHS attributes (5 points)
+
+Compare means and variances of the attributes in the world health statisics dataset -- plot of variance vs. mean is probably the best given number of attributes in the dataset.  Function `apply` allows to apply desired function (e.g. `mean` or `var`) to each row or column in the table.  Do you see all `r ncol(whsAnnBdatNum)` attributes in the plot, or at least most of them?  (Remember that you can use `plot(inpX,inpY,log="xy")` to use log-scale on both horizontal and vertical axes.)  What is the range of means and variances when calculated on untransformed data?  Which are the top two attributes with highest mean or variance?  What are the implications for PCA rendition of this dataset (in two dimensions) if applied to untransformed data?
+
+```{r problem_1a}
+
+#Thanks for cleaning the data!
+# Reading in the countries
+countries <- row.names(whsAnnBdatNum)
+
+#Means of GHO statistics
+gho.mean <- apply(whsAnnBdatNum,2,mean)
+cat("Mean of untransformed values is:", range(gho.mean))
+
+#Variances of GHO statistics
+gho.var <- apply(whsAnnBdatNum,2,var)
+cat("Variance of untransformed values is:", range(gho.var))
+
+#Sorting the data before plotting
+gho.data <- data.frame(gho.mean, gho.var)
+gho.data <-gho.data[order(gho.mean),]
+
+plot(gho.data$gho.mean, gho.data$gho.var, log="xy", xlab="log(mean) GHO statistics",ylab="log(var) GHO statisics")
+
+#Top 2 Mean
+cat("The 2 variables with the highest mean are:",names(gho.mean)[which(gho.mean %in% tail(sort(gho.mean), 2))])
+
+
+#Top 2 Variance
+cat("The 2 variables with the highest variance are:",names(gho.var)[which(gho.var %in% tail(sort(gho.var), 2))])
+
+#
+# If we try using PCA on the untransformed data, given the different units used in the reporting, we will have a biplot that where the signal from the largest variables drown out the others
+
+```
+
+## Sub-problem 1b: PCA on untransformed data (10 points)
+
+Perform PCA on *untransformed* data in WHS dataset (remember, you can use R function `prcomp` for that).  Generate scree plot of PCA results (by calling `plot` on the result of `prcomp`) and plot of the two first principal components using `biplot`.  Which variables seem to predominantly drive the results of PCA when applied to untransformed data?
+
+```{r}
+
+#Performing PCA on untransformed data
+pc.out <- prcomp(whsAnnBdatNum)
+
+#Scree plot of Principal Components
+plot(pc.out)
+
+biplot(pc.out)
+
+
+#From the scree plot we can see that the first Principal Component 
+#accounts for pretty much the entire variance.
+#From the Biplot, it seems that INTINTDS, the variable that had by far the highest mean and Variance is driving this
+#
+```
+
+
+
+
+Please note that in this case you should expect `biplot` to generate substantial number of warnings.  Usually in R we should pay attention to these and understand whether they indicate that something went wrong in our analyses.  In this particular case they are expected -- why do you think that is?
+
+```{r}
+#As a guess, I think this is due to the principal components being too small to plot on the same scales
+```
+
+
+
+The field `rotation` in the output of `prcomp` contains *loadings* of the 1st, 2nd, etc. principal components (PCs) -- that can interpreted as contributions of each of the attributes in the input data to each of the PCs.  What attributes have the largest (by their absolute value) loadings for the first and second principal component?  How does it compare to what you have observed when comparing means and variances of all attributes in the world health statistics dataset?
+
+```{r}
+pc.rot <- pc.out$rotation
+
+#Get first 2 principal components
+pc.rot2 <- pc.rot[,1:2]
+
+#Variable with largest loading 
+row.names(pc.rot2)[which.max(abs(pc.rot2))]
+
+#This is consistent with what we expected, as PCA creates components based on the highest variance, and INTINTDS had by far the largest variance.
+
+```
+
+
+
+
+Calculate percentage of variance explained (PVE) by the first five principal components (PCs).  You can find an example of doing this in ISLR Chapter 10.4 (Lab 1 on PCA).
+
+```{r}
+# Getting the variances from the squared SD for the first 5 principal compenents
+pr.var <- pc.out$sdev[1:5] ^2
+
+# Percent variance explained is the proportion of the variance from each Principal component relative to the total variance
+pve <- pr.var/sum(pr.var)
+```
+
+
+
+Lastly, perform PCA on *transposed* (but still *untransformed*) WHS dataset -- remember that in R `t(x)` returns transpose of `x`:
+
+```{r}
+matrix(1:6,ncol=3)
+t(matrix(1:6,ncol=3))
+
+pc.tr <- prcomp(t(whsAnnBdatNum))
+
+
+
+```
+
+Present results of PCA on transposed world health statistics dataset in the form of scree and biplot, describe the results.
+
+```{r}
+
+plot(pc.tr)
+biplot(pc.tr)
+```
+
+
+## Sub-problem 1c: PCA on scaled WHS data (10 points)
+
+Perform PCA on scaled world health statistics data.  To do that you can either use as input to `prcomp` the output of`scale` as applied to the WHS data matrix or call `prcomp` with parameter `scale` set to `TRUE`.  Present results of PCA in the form of scree plot and plot of the first two principal components.  How do they compare to those generated on the results of PCA of *untransformed* data?  What dataset attributes contribute the most (by absolute value) to the top two PCs?  What are the signs of those contributions?  How would you interpret that?
+
+
+```{r}
+
+#Scaline prior to PCA
+pc.scale <- prcomp(whsAnnBdatNum,scale=TRUE)
+
+
+plot(pc.scale)
+
+biplot(pc.scale, cex=.5)
+
+```
+
+
+
+The output of `biplot` with almost 200 text labels on it is pretty busy and could be tough to read.  You can achieve better control when plotting PCA results if instead you plot the first two columns of the `x` attribute in the output of `prcomp` -- e.g. `plot(prcomp(USArrests,scale=T)$x[,1:2])`.  Use this to label a subset of countries on the plot -- you can use `text` function in R to add labels at specified positions on the plot -- please feel free to choose several countries of your preference and discuss the results.  Alternatively, indicate US, UK, China, India, Mexico, Australia, Israel, Italy, Ireland and Sweden and discuss the results.  Where do the countries you have plotted fall in the graph?  Considering what you found out about contributions of different attributes to the first two PCs, what do their positions tell us about their (dis-)similarities in terms of associated health statistics?
+
+
+```{r}
+#countries of interest
+countries <- c("UnitedStatesofAmerica" , "UnitedKingdom" , "China", "India", "Mexico", "Australia", "Israel", "Italy", "Ireland","Sweden")
+
+#Plot of principal components
+plot(pc.scale$x[,1:2])
+
+#Subset for countries of interest
+pc.count <- pc.scale$x[row.names(pc.scale$x) %in% countries,1:2]
+
+#Highlighted countries
+points(pc.count,col="red",pch=19)
+
+#Labelled countries of interest
+text(pc.count,labels=row.names(pc.count),cex=.8,col="blue")
+
+```
+
+Finally, perform PCA on *transposed* scaled WHS dataset -- present results in the form of scree plot and biplot and discuss these presentations.
+
+
+```{r}
+
+tr <- t(whsAnnBdatNum)
+pca.tran <- prcomp(tr, scale=TRUE)
+
+plot(pca.tran)
+
+biplot(pca.tran, cex=.5)
+
+#After transposing the countries are now the variables, and the stats are the observations
+#The scaling is done on the variables and not on the obeservation, so we still have a plot resembling the unscaled plot
+
+tr.means <- apply(tr,1,mean)
+tr.vars <- apply(tr,1,var)
+
+range(tr.means)
+range(tr.vars)
+```
+
+
+
+### For *extra 8 points*
+
+Try the following:
+
+* Instead of scaling (or prior to scaling) perform log-transform of the data before passing it on to `prcomp`.  Given that some of the attributes have zero values, you will have to decide how to handle those to avoid negative infinity upon log-transformation.  Usually, a small positive (often a fraction of smallest non-zero value for that attribute) value is added to all (or just zero) values of the attribute that contains zeroes.  Present and describe the results.
+* Demonstrate equivalence of the results as obtained by `prcomp(x)` and `cmdscale(dist(x))` where `x` represents scaled WHS dataset.
+* Explore use of multidimensional scaling (MDS) tools available in library `MASS` such as `sammon` and `isoMDS`.  Present their results and discuss the differences between them and PCA output.  No, there was nothing on that in the lecture -- thus it is for extra points and to broaden your horizons.
+
+
+
+```{r}
+
+log.data <- log(whsAnnBdatNum+1)
+pr.log <- prcomp(log.data, scale = TRUE)
+plot(pr.log)
+
+
+
+sc.log <- cmdscale(dist(scale(log.data)))
+sc.norm <- cmdscale(dist(whsAnnBdatNum))
+apply(sc.log,2,range)
+apply(sc.norm,2,range)
+
+#As suspected, the range of the values in the log transformed data is significantly smaller that the range of the normal values
+
+library(MASS)
+```
+
+
+# Problem 2: K-means clustering (15 points)
+
+## Sub-problem 2a: k-means clusters of different size (5 points)
+
+Using function `kmeans` perform K-means clustering on *explicitly scaled* (e.g. `kmeans(scale(x),2)`) world health statistics data for 2, 3 and 4 clusters.  Use `cluster` attribute in the output of `kmeans` to indicate cluster membership by color and/or shape of the corresponding symbols in the plot of the first two principal components generated independently on the same (scaled WHS) data.  E.g. `plot(prcomp(xyz)$x[,1:2],col=kmeans(xyz,4)$cluster)` where `xyz` is input data.  Describe the results.  Which countries are clustered together for each of these choices of $K$?
+
+
+```{r}
+
+
+
+for (k in 2:4){
+   km = kmeans(pc.scale$x[,1:2],k)
+   plot(pc.scale$x[,1:2],col=km$cluster+1)
+   
+   #Labelled countries of interest
+  text(pc.scale$x[,1:2],labels=row.names(pc.scale$x),cex=.5,col="black")
+
+}
+
+#When K=2, countries seem roughly divided on 1st and 3rd world nations/northern vs southern
+#When K=3, the countries in blue are generally wealthy northern countries, in green are generally the developing southern countries, while the red is the African subcontinent countries
+#When K=4, we get a further split of the mostly African and Middle Eastern countries with fairly recent large scale instability such as war.
+
+
+```
+
+
+
+
+## Sub-problem 2b: variability of k-means clustering (5 points)
+
+By default, k-means clustering uses random set of centers as initial guesses of cluster centers.  Here we will explore variability of k-means cluster membership across several such initial random guesses.  To make such choices of random centers reproducible, we will use function `set.seed` to reset random number generator (RNG) used in R to make those initial guesses to known/controlled initial state.
+
+Using the approach defined above, repeat k-means clustering with four clusters three times resetting RNG each time with `set.seed` using seeds of 1, 2 and 3 respectively.  Indicate cluster membership in each of these three trials on the plot of the first two principal components using color and/or shape as described above.  Two fields in the output of `kmeans` -- `tot.withinss` and `betweenss` -- characterize within and between clusters sum-of-squares.  Tighter clustering results are those which have smaller ratio of within to between sum-of-squares.  What are the resulting ratios of within to between sum-of-squares for each of these three k-means clustering results (with random seeds of 1, 2 and 3)?
+
+Please bear in mind that the actual cluster identity is assigned randomly and does not matter -- i.e. if cluster 1 from the first run of `kmeans` (with random seed of 1) and cluster 4 from the run with the random seed of 2 contain the same observations (country/states in case of WHS dataset), they are *the same* clusters.
+
+
+```{r}
+
+
+kmeans4 <- function(upRange,...){
+  for (i in 1:upRange){
+    set.seed(i)
+    km4 <- kmeans(pc.scale$x[,1:2],4,...)
+    plot(pc.scale$x[,1:2],col=km4$cluster+1)
+    cat("Ratio of within and between cluster sum of squares seed=",i," : " ,km4$tot.withinss/km4$betweenss,"\n")
+  }
+}
+
+kmeans4(3)
+```
+
+
+
+## Sub-problem 2c: effect of `nstarts` parameter (5 points)
+
+Repeat the procedure implemented for the previous sub-problem (k-means with four clusters for RNG seeds of 1, 2 and 3) now using 100 as `nstart` parameter in the call to `kmeans`.  Represent results graphically as before.  How does cluster membership compare between those three runs now?  What is the ratio of within to between sum-of-squares in each of these three cases?  What is the impact of using higher than 1 (default) value of `nstart`?  What is the ISLR recommendation on this offered in Ch. 10.5.1?
+
+
+
+```{r}
+kmeans4(3,nstart=100)
+
+#The groups created by the clustering are now identical for these three rns
+#We can also see that the ratio of within to between sum-of-squares is now identical across the runs. 
+
+
+#The advantage of using a higher nstart is that we can compare more starting position combinations and are more likely to find the global minima and not a local minima. A value of nstart 20 to 50 is highly recommended in ISLR
+```
+
+### For *extra 8 points*
+
+Try the following:
+
+* evaluate dependency between the stability of k-means clustering and the number of clusters and values of `nstarts`; to make this more quantitative consider using contingency table (i.e. `table`) to quantify concordance of two different clustering results (E.g. how many non-zero cells would be in the output of `table` for two perfectly concordant clustering assignments?)
+* Try using `silhouette` from the library `cluster` as another tool for assessing cluster strength for some of the clusters obtained here and describe the results
+
+```{r}
+library(cluster)
+
+set.seed(1)
+kvals <- c(2,4,6,8,16)
+nvals <- c(5,10,20,50)
+
+#Effect of varying K
+km2 <- kmeans(pc.scale$x[,1:2],2)
+km4 <- kmeans(pc.scale$x[,1:2],4)
+km6 <- kmeans(pc.scale$x[,1:2],6)
+km8 <- kmeans(pc.scale$x[,1:2],8)
+km16 <- kmeans(pc.scale$x[,1:2],16)
+
+table(km2$cluster)
+table(km4$cluster)
+table(km6$cluster)
+table(km8$cluster)
+table(km16$cluster)
+
+max(table(km2$cluster))
+max(table(km4$cluster))
+max(table(km6$cluster))
+max(table(km8$cluster))
+max(table(km16$cluster))
+
+#Initially when the number of clusters are low, we can see that increasing the number of clusters, splits the largest clusters into subclusters, however, after a point, there seems some oscillation on the max cluster size and not necessarily decreasing like I would expect
+
+
+set.seed(1)
+#Effect of varying nstart
+ns1  <- kmeans(pc.scale$x[,1:2],4)
+ns5  <- kmeans(pc.scale$x[,1:2],4,nstart=5)
+ns10 <- kmeans(pc.scale$x[,1:2],4,nstart=10)
+ns20 <- kmeans(pc.scale$x[,1:2],4,nstart=20)
+ns50 <- kmeans(pc.scale$x[,1:2],4,nstart=50)
+ns100 <- kmeans(pc.scale$x[,1:2],4,nstart=100)
+ns200 <- kmeans(pc.scale$x[,1:2],4,nstart=200)
+
+sort(table(ns1$cluster))
+sort(table(ns5$cluster))
+sort(table(ns10$cluster))
+sort(table(ns20$cluster))
+sort(table(ns50$cluster))
+sort(table(ns100$cluster))
+sort(table(ns200$cluster))
+
+#In this particular example, we can see that using a nstart of 1 doesnt do a good job of finding the optimal groups, however after nstart=10, it looks to have found the best subset as it doesnt change when increasing the number of starting positions.
+
+```
+
+
+
+
+# Problem 3: Hierarchical clustering (20 points)
+
+## Sub-problem 3a: hierachical clustering by different linkages (10 points)
+
+Cluster country states in (scaled) world health statistics data using default (Euclidean) distance and "complete", "average", "single" and "ward" linkages in the call to `hclust`.  Plot each clustering hierarchy, describe the differences.  For comparison, plot results of clustering *untransformed* WHS data using default parameters (Euclidean distance, "complete" linkage) -- discuss the impact of the scaling on the outcome of hierarchical clustering.
+
+```{r}
+
+
+whs.scaled = scale(whsAnnBdatNum)
+par(mfrow=c(1,1))
+for (method in  c("complete", "average", "single", "ward.D")){
+  clust <- hclust(dist(whs.scaled), method=method)
+  plot(clust, cex=.5,xlab="", ylab="",main = paste0("Dendogram: ", method))
+}
+
+
+#All dendograms, with the exception of the Ward method, have India as a leaf singleton. The single method seems quite hard to interpret as the distances between branches is mostly uniform. Both the average and complete methods show a stronger bushier heirachy.   
+
+unscaled.clust = hclust(dist(whsAnnBdatNum))
+plot(unscaled.clust,cex=.5,xlab="", ylab="",main = "Unscaled Dendogram")
+
+# The difference that jumps out in the unscaled clustering is how strongly it is affected by the outlier India. The heirachy also seems pretty flat after 4 clusters have been identified. The height of the tree is most likely being skewed by this.
+
+```
+
+
+
+
+## Sub-problem 3b: compare k-means and hierarchical clustering (5 points)
+
+Using function `cutree` on the output of `hclust` determine assignment of the countries in WHS dataset into top four clusters when using Euclidean distance and "complete" linkage.  Use function `table` to compare membership of these clusters to those produced by k-means clustering with four clusters in the Problem 2(c) above.  Discuss the results.
+
+
+```{r}
+
+
+hclust(dist(whs.scaled))
+hclust4 <- cutree(hclust(dist(whs.scaled)),4)
+kmeans4 <- kmeans(pc.scale$x[,1:2],4)
+
+table(hclust4)
+table(kmeans4$cluster)
+#The heirachical clustering was performed on the 2 first principal components
+#whereas the kmeans was done on the scaled data
+#The Heirachical clustering has produced 2 singletons on a cluster of 4
+#While the kmeans has produced 4 rather similar sized clusters
+
+
+hclust.pc4 <- cutree(hclust(dist(pc.scale$x[,1:2])),4)
+table(hclust.pc4,kmeans4$cluster)
+
+
+#Indeed, if we compare against the hclust done on the 2 Principal components we get more similar results
+
+
+```
+
+## Sub-problem 3c: cluster variables by correlation (5 points)
+
+Use (casted as distance) one-complement of Spearman correlation between *attributes* in world health statistics dataset to cluster *attributes* of WHS dataset.  E.g. `hclust(as.dist(1-cor(xyz,method="spearman")))` would cluster columns (as opposed to rows) in the matrix `xyz`.  Plot the results -- which variables tend to cluster together, why do you think that is?  Compare results obtained by this approach for scaled and untransformed WHS dataset?  How do they compare? What do you think is the explanation?
+
+```{r}
+
+sp.clust <- hclust(as.dist(1-cor(whsAnnBdatNum,method="spearman")))
+plot(sp.clust, cex=.5)
+
+
+
+```
+
+```{r}
+sp.clust.scaled <- hclust(as.dist(1-cor(whs.scaled,method="spearman")))
+plot(sp.clust.scaled, cex=.5)
+
+
+range(as.dist(1-cor(whsAnnBdatNum,method="spearman")))
+range(as.dist(1-cor(whs.scaled,method="spearman")))
+
+
+#This is due to the correlation calculated on both the scaled and unscaled data being the same. 
+#As part of the correlation formula involves scaling the variables ((x-x_bar)/sigma_x)..., the difference in scale will not affect the correlation matrix.
+#
+
+
+```
+
+### For *extra 4 points*
+
+Use contingency tables to compare cluster memberships for several top clusters across different choices of linkage (e.g. "complete","ward","single") and distance (Euclidean, Manhattan, one-complement of correlation coefficient).  Discuss the results.
+
+```{r}
+
+table(cutree(hclust(dist(whs.scaled),method="complete"),4))
+table(cutree(hclust(dist(whs.scaled),method="average"),4))
+table(cutree(hclust(dist(whs.scaled),method="single"),4))
+
+table(cutree(hclust(dist(whs.scaled),method="complete"),6))
+table(cutree(hclust(dist(whs.scaled),method="average"),6))
+table(cutree(hclust(dist(whs.scaled),method="single"),6))
+
+#When we are only picking the top 4, we can see that the single and average methods produce the same result for this data. However, changing the cut to 6, shows that the complete and average methods are more similar
+
+table(cutree(hclust(dist(whs.scaled,method="manhattan")),6))
+table(cutree(hclust(dist(whs.scaled,method="euclidean")),6))
+table(cutree(hclust(dist(whs.scaled,method="maximum")),6))
+
+#The euclidean in this example creates more singletons than the manhattan, this may be due to clustering at the high level it is distinguishing based on relative position (left or right), whereas the manhattan, being performed on the absolute distance has a more shallow tree. The maximum distance method, in this case has clusterd all six into the same group.
+
+
+
+```
+
+
+
+
+# Appendix: pre-processing of WHS data
+
+For your reference only -- the file it generated is already available on course website
+
+```{r WHSpreproc,eval=FALSE}
+whsAnnBdat <- read.table("../data/whs2016_AnnexB-data.txt",sep="\t",header=T,as.is=T,quote="")
+dim(whsAnnBdat)
+whsAnnBdat <- apply(whsAnnBdat,2,function(x)gsub(">","",gsub("<","",gsub(" ","",x))))
+whsAnnBdat <- apply(whsAnnBdat,2,function(x){x[x==rawToChar(as.raw(150))]<-"";x})
+rownames(whsAnnBdat) <- whsAnnBdat[,1]
+whsAnnBdat <- whsAnnBdat[,-1]
+whsAnnBdatNum <- apply(whsAnnBdat,2,as.numeric)
+whsAnnBdatNum <- apply(whsAnnBdatNum,2,function(x){x[is.na(x)] <- mean(x,na.rm = TRUE);x})
+rownames(whsAnnBdatNum) <- rownames(whsAnnBdat)
+write.table(whsAnnBdatNum,"../data/whs2016_AnnexB-data-wo-NAs.txt",quote=F,sep="\t")
+```

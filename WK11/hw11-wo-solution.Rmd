@@ -1,0 +1,308 @@
+---
+title: "CSCI E-63C Week 11 assignment"
+output:
+  html_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+library(ISLR)
+library(e1071)
+library(randomForest)
+library(class)
+library(ggplot2)
+library(knitr)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Preface
+
+This week assignment will explore behavior of support vector classifiers and SVMs (following the distinction made in ISLR) on banknote authentication dataset from UCI ML archive.  We worked with it on multiple occasions before (most recently two weeks ago evaluating performance of logistic regression, discriminant analysis and KNN on it):
+
+```{r dbaExample}
+dbaDat <- read.table("data_banknote_authentication.txt",sep=",")
+colnames(dbaDat) <- c("var","skew","curt","entr","auth")
+dbaDat$auth <- factor(dbaDat$auth)
+dim(dbaDat)
+summary(dbaDat)
+head(dbaDat)
+pairs(dbaDat[,1:4],col=as.numeric(dbaDat$auth))
+```
+
+Here we will use SVM implementation available in library `e1071` to fit classifiers with linear and radial (polynomial for extra points) kernels and compare their relative performance as well as to that of random forest and KNN.
+
+# Problem 1 (20 points): support vector classifier (i.e. using linear kernel) 
+
+Use `svm` from library `e1071` with `kernel="linear"` to fit classifier (e.g. ISLR Ch.9.6.1) to the entire banknote authentication dataset setting parameter `cost` to 0.001, 1, 1000 and 1 mln.  Describe how this change in parameter `cost` affects model fitting process (hint: the difficulty of the underlying optimization problem increases with cost -- can you explain what drives it?) and its outcome (how does the number of support vectors change with `cost`?) and what are the implications of that.  Explain why change in `cost` value impacts number of support vectors found. (Hint: there is an answer in ISLR.)  Use `tune` function from library `e1071` (see ISLR Ch.9.6.1 for details and examples of usage) to determine approximate value of cost (in the range between 0.1 and 100 -- the suggested range spanning ordes of magnitude should hint that the density of the grid should be approximately logarithmic -- e.g. 1, 3, 10, ... or 1, 2, 5, 10, ... etc.) that yields the lowest error in cross-validation employed by `tune`.  Setup a resampling procedure repeatedly splitting entire dataset inraining and test, using training data to `tune` cost value and test dataset to estimate classification error. Report and discuss distributions of test errors from this procedure and selected values of `cost`.
+
+```{r question_1}
+
+svmfit1 <- svm(auth~., data=dbaDat, kernel="linear", cost=0.001, scale=FALSE)
+
+svmfit2 <- svm(auth~., data=dbaDat, kernel="linear", cost=1, scale=FALSE)
+
+svmfit3 <- svm(auth~., data=dbaDat, kernel="linear", cost=1000, scale=FALSE)
+
+svmfit4 <- svm(auth~., data=dbaDat, kernel="linear", cost=1000000, scale=FALSE)
+
+
+kable(data.frame(svmfit1$tot.nSV,
+                 svmfit2$tot.nSV,
+                 svmfit3$tot.nSV,
+                 svmfit4$tot.nSV))
+
+
+#The cost, is the tuning parameter that determines how many points are allowed to be on the wrong side of the hyperplane (misclassifications). 
+
+#Smaller value of cost, increases the number of support vectors as it widens the margin (soft margins). When the cost increases, the number of support vectors decreases as the margin is shrunk (hard margins).
+
+
+#pe
+set.seed (1)
+tune.out <- tune(svm,auth~.,data=dbaDat,kernel="linear", ranges=list(cost=c(0.1,1,2,5,10,20,50,80,100)))
+
+summary(tune.out)
+
+set.seed(1234)
+ce <- matrix(nrow=100,ncol=7)
+
+for (k in seq(3,9)){
+    for (j in 1:100){
+      bTrain <- sample(c(FALSE,TRUE),nrow(dbaDat),replace=TRUE)
+      to <- tune(svm, auth~.,data = dbaDat[bTrain,], kernel="linear", ranges=list(cost=k))
+      cm <- as.matrix(table(dbaDat[!bTrain,"auth"], predict(to$best.model,newdata=dbaDat[!bTrain,])))
+      ce[j,k-2] <- 1-(sum(diag(cm))/sum(cm))
+    }
+}
+
+boxplot(ce, xlab="Cost", ylab="Test error %")
+points(colMeans(ce),pch=3, col="red")
+
+
+#We can see that the mean test error reduces quite significantly for costs greater than 1, we then see little change in the mean cost, but a reduction in the spread of test errors. Finally, after cost=5 (the previously identified optimal cost), we start to see an increase in variance and mean test error. From this it looks like the true optimal cost is somewhere between 4 and 6.
+
+
+#zooming in a little further using bootstrap sampling from tune.svm
+set.seed(1234)
+ts <- tune.svm(auth~.,data = dbaDat, kernel="linear", cost=seq(4,6,.1),tunecontrol=tune.control(sampling = "boot",nboot=100) )
+summary(ts)
+plot(ts)
+
+#Optimal cost appears to be around 4.3
+#Fitting model again with optimal cost. want to use the same training and test set for other models for comparison of test error
+
+set.seed(1)
+gTrain <- sample(c(FALSE,TRUE),nrow(dbaDat),replace=TRUE)
+gLbl <- dbaDat$auth
+
+set.seed(1)
+svm.lin.model <- svm(auth~., data=dbaDat[gTrain,], kernel="linear", cost=4.3)
+svm.lin.tab <- table(dbaDat[!gTrain,"auth"], predict(svm.lin.model,newdata=dbaDat[!gTrain,]))
+
+svm.lin.err <-  1-(sum(diag(svm.lin.tab))/sum(svm.lin.tab))
+svm.lin.err
+```
+
+
+# Problem 2 (10 points): comparison to random forest
+
+Fit random forest classifier on the entire banknote authentication dataset with default parameters.  Calculate resulting misclassification error as reported by the confusion matrix in random forest output.  Explain why error reported in random forest confusion matrix represents estimated test (as opposed to train) error of the procedure.  Compare resulting test error to that for support vector classifier obtained above and discuss results of such comparison.
+
+
+
+```{r}
+set.seed(1234)
+rf <- randomForest(dbaDat[,-5],dbaDat$auth)
+rf$confusion
+
+1-(sum(diag(rf$confusion))/sum(rf$confusion))
+## Random Forest does not require a separate cross-validation to estimate test Errors, Breiman [1996b]. The errors from the confusion matrix are the Out of Bag (OOB) errors. So from bootstrapped samples the error is the average error of all test set predictions.
+
+## Test error rate for random fores ist .005 compared to the .008 observed from the SVM. The data is pretty linearly separable so we get good performance on either methods.
+
+
+set.seed(1)
+rf.model <-randomForest(dbaDat[gTrain,-5],gLbl[gTrain])
+rf.tab <- table(dbaDat[!gTrain,"auth"], predict(rf.model,newdata=dbaDat[!gTrain,]))
+
+rf.err <-  1-(sum(diag(rf.tab))/sum(rf.tab))
+rf.err
+
+#Running a single model using same training and test set for comparisons
+
+```
+
+# Extra 7 points problem: effect of `mtry` and `ntree` in random forest
+
+Not directly related to SVM, but while we are at it: fit random forest to the entire banknote authentication dataset for every possible value of parameter `mtry` and using `ntree` of 100 and 1000 for each of them.  The values of `mtry` possible in this case are 1, 2, 3 and 4.  Please explain what is governed by this parameter and why this is the exhaustive set of the values allowed for it in this case. Would it change for another dataset?  What is the default value of `mtry` for this dataset?  Repeat this several times to assess center and spread of the error rates produced by random forest with these parameters across multiple runs of random forest procedure.  Present these results graphically and comment on the impact of the choices of `mtry` and `ntree` on the resulting error rates.
+
+```{r}
+set.seed(1234)
+dfTmp <- NULL
+
+for (mtry in 1:4){
+    for (ntree in c(100,1000)){
+      for (j in 1:100){
+      bTrain <- sample(c(FALSE,TRUE),nrow(dbaDat),replace=TRUE)
+      cls <- as.factor(dbaDat$auth)
+      rf <- randomForest(dbaDat[bTrain,-5],cls[bTrain], mtry = mtry, ntree = ntree)
+      dfTmp <- rbind(dfTmp, data.frame(error=1-(sum(diag(rf$confusion))/sum(rf$confusion)),mtry=mtry,ntree=ntree))
+      }
+    }
+}
+
+
+ggplot(dfTmp, aes(mtry, error, group=mtry)) + geom_boxplot()  + facet_grid(~ntree)
+
+#mtry, is the number of parameters that are randomly sampled as candidates at each split. This is bound by the number of variables (in our case: 4).
+#Normally mtry is sqrt(ncol(x)), so default should be 2
+
+#Generally, all things being equal, an increase in ntree, from 100 to 1000, leads to a slight decrease in error on our dataset
+#We see a slight decrease in variance from mtry 1 to 2 (default), as mtry increases after that, we see an increase in test error
+
+
+```
+
+# Problem 3 (10 points): Comparison to cross-validation tuned KNN predictor
+
+Use convenience wrapper `tune.knn` provided by the library `e1071` on the entire dataset to determine optimal value for the number of the nearest neighbors 'k' to be used in KNN classifier.  Consider our observations in week 9 assignment when choosing range of values of `k` to be evaluated by `tune.knn`.  Setup resampling procedure similar to that used above for support vector classifier that will repeatedly: a) split banknote authentication dataset into training and test, b) use `tune.knn` on training data to determine optimal `k`, and c) use `k` estimated by `tune.knn` to make KNN classifications on test data.  Report and discuss distributions of test errors from this procedure and selected values of `k`, compare them to those obtained for random forest and support vector classifier above.
+
+```{r}
+
+
+set.seed(1234)
+tk<- tune.knn(dbaDat[,-5],dbaDat$auth,k=1:10,tunecontrol=tune.control(sampling = "boot",nboot=200) )
+
+plot(tk$performances$error,ylab="Error %", xlab = "K")
+
+#Here we can see that error is lowest when k=2, then starts to increase as we see underfitting and the error rate increases exponentially
+
+#Resampling to get error distributions
+set.seed(1234)
+ce <- matrix(nrow=100,ncol=10)
+
+for (k in seq(1,10)){
+    for (j in 1:100){
+      bTrain <- sample(c(FALSE,TRUE),nrow(dbaDat),replace=TRUE)
+      cls <- as.factor(dbaDat$auth)
+      tk1 <- knn(dbaDat[bTrain,],dbaDat[!bTrain,],k=k,cl=cls[bTrain])
+      cm <- as.matrix(table(dbaDat[!bTrain,5],tk1))
+      ce[j,k] <- 1-(sum(diag(cm))/sum(cm))
+    }
+}
+
+boxplot(ce, xlab="K", ylab="Test error %")
+points(colMeans(ce),pch=3, col="red")
+
+#Again, we see that for k=2 and 3, low test error rates as well as low variance. As the values of K increase, we get increasing number of outliers followed by an increase in mean error rates
+
+#For k=2, we have observed 0 error rates, for low values of k, KNN seems to outperform both the forest and SVM. I'm assuming this is due to, despite very good performance on the other methods also, there is some data that is not linearly separable that knn just does a better job of fitting
+
+set.seed(1)
+knn.model <-knn(dbaDat[gTrain,],dbaDat[!gTrain,],k=2,cl=as.factor(gLbl[gTrain]))
+knn.tab <- table(dbaDat[!gTrain,"auth"], knn.model)
+knn.err <-  1-(sum(diag(knn.tab))/sum(knn.tab))
+knn.err
+
+```
+
+# Problem 4 (20 points): SVM with radial kernel
+
+## Sub-problem 4a (10 points): impact of $gamma$ on classification surface
+
+*Plot* SVM model fit to the banknote authentication dataset using (for the ease of plotting) *only variance and skewness* as predictors variables, `kernel="radial"`, `cost=1` and `gamma=1` (see ISLR Ch.9.6.2 for an example of that done with a simulated dataset).  You should be able to see in the resulting plot the magenta-cyan classification boundary as computed by this model.  Produce the same kinds of plots using 0.01 and 100 as values of `gamma` also.  Compare classification boundaries between these three plots and describe how they are impacted by the change in the value of `gamma`.  Can you trace it back to the role of `gamma` in the equation introducing it with the radial kernel in ISLR?
+
+```{r}
+
+d <- dbaDat[,c(1,2,5)]
+svmfit <- svm(auth~var+skew, data=d, kernel="radial", gamma=1,
+cost =1)
+plot(svmfit,d)
+
+#Gamma 0.01
+svm1 <-  svm(auth~var+skew, data=d, kernel="radial", gamma=.01,
+cost =1)
+plot(svm1, d)
+
+#Gamma 100
+svm2 <-  svm(auth~var+skew, data=d, kernel="radial", gamma=100,
+cost =1)
+
+plot(svm2, d)
+
+# We can see that as gamma increases, the classification boundary is increasingly non-linear and looks to fit the individual points around the boundary more closely. ie small gamma allows data points from far apart to be considered similar, whereas large gamma fits more locally (a bit like an inverse of the role of k in knn)
+
+#Generally speaking large gamma leads to high bias and low variance, and vice versa.
+
+```
+
+
+## Sub-problem 4b (10 points): test error for SVM with radial kernel
+
+Similar to how it was done above for support vector classifier (and KNN), set up a resampling process that will repeatedly: a) split the entire dataset (using all attributes as predictors) into training and test datasets, b) use `tune` function to determine optimal values of `cost` and `gamma` and c) calculate test error using these values of `cost` and `gamma`.  You can start with `cost=c(1,2,5,10,20)` and `gamma=c(0.01,0.02,0.05,0.1,0.2)` as starting ranges to evaluate by `tune`, but please feel free to experiment with different sets of values and discuss the results of it and how you would go about selecting those ranges starting from scratch.  Present resulting test error graphically, compare it to that of support vector classifier (with linear kernel), random forest and KNN classifiers obtained above and discuss results of these comparisons. 
+
+```{r}
+set.seed(1234)
+tune.out<- tune(svm, auth~., data=dbaDat, kernel="radial",
+ranges=list(cost=c(1,2,5,10,20),
+gamma=c(.01,.02,.05,.1,.2) ))
+summary(tune.out)
+
+ggplot(tune.out$performances, aes(gamma, error)) + geom_point()  + facet_grid(~cost)
+
+#We can see that gamma values of >.1 produce OOB error rates of 0
+#Increasing the cost parameter has a significant effect, however not nearly as pronounced as the change in error rates by changing gamma
+
+#Best parameters found at cost=5 and gamma=.05
+
+#The performance here has been better than what was observed for random forest and comparable to knn when k=2
+
+set.seed(1)
+svm.radial.model <- svm(auth~., data=dbaDat[gTrain,], kernel="radial", cost=5, gamma=.05)
+svm.radial.tab <- table(dbaDat[!gTrain,"auth"], predict(svm.radial.model,newdata=dbaDat[!gTrain,]))
+
+svm.radial.err <-  1-(sum(diag(svm.radial.tab))/sum(svm.radial.tab))
+svm.radial.err
+
+library(knitr)
+kable(data.frame(svm.lin.err,svm.radial.err,knn.err,rf.err))
+
+#For our single test case example, knn still performs the best, svm radial and random forest are identical at .004, and svm linear performed the worst 
+
+```
+
+
+# Extra 8 points problem: SVM with polynomial kernel
+
+Repeat what was done above (plots of decision boundaries for various interesting values of tuning parameters and test error for their best values estimated from training data) using `kernel="polynomial"`.   Determine ranges of `cost` and `gamma` to be evaluated by `tune`.  Present and discuss resulting test error and how it compares to linear and radial kernels and those of random forest and SVM.
+
+```{r}
+
+set.seed(1234)
+ts.poly <- tune(svm, auth~., data=dbaDat, kernel="polynomial",tunecontrol=tune.control(sampling = "boot",nboot=100) ,
+ranges=list(cost=c(1,2,5,10,20),
+gamma=c(.01,.02,.05,.1,.2) ))
+summary(ts.poly)
+
+#Best OOB error is .009
+
+set.seed(1)
+svm.poly.model <- svm(auth~., data=dbaDat[gTrain,], kernel="polynomial", cost=20, gamma=.2)
+svm.poly.tab <- table(dbaDat[!gTrain,"auth"], predict(svm.poly.model,newdata=dbaDat[!gTrain,-5]))
+
+svm.poly.err <-  1-(sum(diag(svm.poly.tab))/sum(svm.poly.tab))
+svm.poly.err
+
+
+kable(data.frame(svm.lin.err,svm.radial.err,svm.poly.err,knn.err,rf.err))
+
+#KNN still performs the best with our sample test set, it seems that the polynomial fit was actually the worst. This strengthens what was observed previously, that our decision boundary looks not quite linear or polynomial, but something else where more flexible techniques do a better job. 
+
+svm5 <-  svm(auth~var+skew, data=d, kernel="polynomial", gamma=.2,
+cost =20)
+plot(svm5, d)
+
+#Using the best optimal values of gamma and cost identified by tune, at least on our text example we get a very nice separation of the boundaries
+```
+
